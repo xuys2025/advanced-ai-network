@@ -1,0 +1,12 @@
+const AICompat = require('./compatibility/values.cjs');
+'use strict';
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const script=fs.readFileSync(path.join(__dirname,'Clash-Rules.js'),'utf8');
+const context=vm.createContext({});vm.runInContext(script,context);const apply=context.applyAdvancedAINetworkLan;
+const config={proxies:[{name:'original',type:'socks5',server:'example.net',port:1080}],rules:['DOMAIN,example.com,original','MATCH,original'],dns:{'enhanced-mode':'fake-ip','fake-ip-range':'198.18.0.1/16','fake-ip-filter':['local.example'],'nameserver-policy':{[AICompat.S_3ce3c6daf93d2d]:'https://example.net/dns-query'}}};
+apply(config);assert.equal(config.proxies[0].name,'original');assert.equal(config.proxies.length,2);assert.equal(config.rules.at(-1),'MATCH,original');assert.equal(config.dns['nameserver-policy']['example.com'],'https://example.net/dns-query');assert.equal(config.dns['nameserver-policy']['rule-set:AdvancedAINetworkManagedDomains'],'tcp://127.0.0.2:53');assert(config.dns['fake-ip-filter'].includes('local.example'));const once=JSON.stringify(config);apply(config);assert.equal(JSON.stringify(config),once);
+assert.throws(()=>apply({dns:{'enhanced-mode':'fake-ip','fake-ip-range':'198.19.0.0/16'}}),/冲突/);
+assert.throws(()=>apply({proxies:[{name:'Advanced-AI-Network-LAN',type:'direct'}]}),/占用/);
+assert.throws(()=>apply({dns:{'fake-ip-filter-mode':'whitelist'}}),/blacklist/);
+const ruleMode=apply({dns:{'fake-ip-filter-mode':'rule','fake-ip-filter':['MATCH,fake-ip']}});assert.equal(ruleMode.dns['fake-ip-filter'].at(-1),'MATCH,fake-ip');
+console.log('PASS Clash preservation, selected domain rules, idempotence, fake-IP conflicts and filter modes');

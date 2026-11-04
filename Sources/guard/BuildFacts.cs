@@ -1,0 +1,1 @@
+namespace AdvancedAINetwork { public static class BuildFacts { public const string CoreSha256="5c19bb3f8c12d4e85b3d47fe63123a7624b314b58dd7a8e32f51004f1c4d2faf"; } }

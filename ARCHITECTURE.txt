@@ -1,0 +1,32 @@
+高级 AI 专用网络 LAN 架构
+
+1. 独立守护接收系统 DNS。命中域名、后缀或关键词时返回选择性 TUN 地址；普通域名交给网卡 DNS。
+2. 受保护域名经 198.19.64.0/18 本机 TUN 进入专用转发器。
+3. 官方 Desktop、原生 CLI、内置 CLI 和规则程序通过 WinDivert 选取 TCP/UDP 流量。
+4. IPv4 CIDR 与 ASN 匹配的直接流量也由 LAN 服务转发。
+5. GatewayTransport 在建立连接前记录 socket 归属。GatewayLink 通过 Npcap 设置以太网下一跳。
+6. Clash 合并脚本从本机 17894 端口获取已验证规则，命中时发往 17891 专用入口。
+7. RuleFeed 每 6 小时通过已选网关下载原规则与 ASN 前缀，校验通过后替换，失败保留旧规则。
+
+关键入口
+Sources/gateway/GatewayService.cs      后台生命周期、暂停、恢复和状态
+Sources/gateway/ProcessIdentity.cs     官方程序、内置 CLI 路径与签名
+Sources/gateway/ManagedRules.cs        域名、IP、ASN 和程序规则解析
+Sources/gateway/RuleFeed.cs            出口受限的规则更新与本机提供器
+Sources/gateway/GatewayProxy.cs        本机 HTTP/SOCKS 代理和双向转发
+Sources/gateway/GatewayTransport.cs    连接归属、IPv4 匹配和转发
+Sources/gateway/GatewayControl.cs      命名管道、网关验证与切换
+Sources/guard                         DNS、动态域名策略和 TUN 守护
+Sources/native                        C# 原生桥接和签名校验
+Sources/third_party/ProxyBridge/src    修改后的 C 转发实现
+Sources/client                        本地 Electron 界面
+
+系统文件
+%ProgramData%/AdvancedAINetworkLanGateway  网关配置、状态和规则
+%ProgramData%/AdvancedAINetworkGuard       域名保护与选择性 TUN
+%LOCALAPPDATA%/AdvancedAIPrivateNetwork    界面偏好和本机日志
+
+服务目录由 SYSTEM/管理员写入。界面通过固定命令的 IPC 与具用户 SID ACL 的命名管道控制后台。
+网关在所选以太网子网内验证；验证令牌有效 5 分钟，应用失败时恢复旧出口。
+每个已打开连接保留其创建时使用的 Route，切换网关的测试应包括已有连接收尾。
+IPv6 不在该发布的转发范围。恢复网络请使用 Uninstall.ps1 -RestoreNetwork。

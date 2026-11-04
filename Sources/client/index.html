@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>高级 AI 专用网络</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<svg class="symbols" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
+<symbol id="i-route" viewBox="0 0 24 24"><circle cx="5.5" cy="5.5" r="2"/><circle cx="18.5" cy="18.5" r="2"/><path d="M7.5 5.5h9a3.75 3.75 0 0 1 0 7.5h-9a2.75 2.75 0 0 0 0 5.5h9"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3.5 7.5 2.8v5.6c0 4.6-3.3 7.7-7.5 9.1-4.2-1.4-7.5-4.5-7.5-9.1V6.3L12 3.5Z"/><path d="m8.8 12.2 2.3 2.3 4.2-4.6"/></symbol>
+<symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6.5 5 13L17 12h4"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5.5-5.5L19 12l-5.5 5.5"/></symbol>
+<symbol id="i-desktop" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.75"/><path d="M8.5 20h7M12 16v4"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="m7.5 9.5 2.5 2.5-2.5 2.5M12.5 14.5h4"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5.5 12.5 4 4 9-9.5"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9.5 7v10M14.5 7v10"/><circle cx="12" cy="12" r="8.5"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.6 3.4 16.8A2 2 0 0 0 5.1 19.8h13.8a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><path d="M12 16.6v.1"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><path d="M12 7.9v.1"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 11A7.5 7.5 0 0 0 6.2 7.2L4.5 9"/><path d="M4.5 5v4h4"/><path d="M4.5 13a7.5 7.5 0 0 0 13.3 3.8l1.7-1.8"/><path d="M19.5 19v-4h-4"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="var(--c-surface)"/><circle cx="15" cy="17" r="2.5" fill="var(--c-surface)"/></symbol>
+</defs></svg>
+<aside class="sidebar" aria-label="应用侧栏">
+  <div class="brand"><div class="brand-icon"><svg aria-hidden="true" focusable="false"><use href="#i-route"/></svg></div><div>高级 AI<small>专用网络 · LAN</small></div></div>
+  <div class="nav-label" id="nav-label">工作空间</div>
+  <nav aria-label="主要导航">
+    <button class="nav active" type="button" data-page="overview" aria-current="page"><svg aria-hidden="true" focusable="false"><use href="#i-grid"/></svg>连接概览</button>
+    <button class="nav" type="button" data-page="network"><svg aria-hidden="true" focusable="false"><use href="#i-route"/></svg>出口设置</button>
+    <button class="nav" type="button" data-page="protection"><svg aria-hidden="true" focusable="false"><use href="#i-shield"/></svg>保护状态</button>
+    <button class="nav" type="button" data-page="diagnostics"><svg aria-hidden="true" focusable="false"><use href="#i-pulse"/></svg>运行诊断</button>
+    <button class="nav" type="button" data-page="preferences"><svg aria-hidden="true" focusable="false"><use href="#i-settings"/></svg>偏好设置</button>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="shield-summary"><svg aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><div><small>独立守护服务</small><span id="guard-summary">正在检查保护</span></div></div>
+    <div class="version">局域网出口版 <span id="backend-release">v0.6.9</span></div>
+  </div>
+</aside>
+<main>
+  <header class="page-header">
+    <div class="page-heading"><div class="eyebrow">高级 AI 专用网络</div><h1 id="page-title">连接概览</h1><p id="page-description">专用流量有专用出口，其余连接保持原样。</p></div>
+    <span id="top-status" class="pill muted">正在连接后台</span>
+  </header>
+
+  <section class="page" id="page-overview" aria-labelledby="page-title">
+    <div class="status-panel">
+      <div class="hero">
+        <div class="hero-art" aria-hidden="true">
+          <div class="orbit one"></div><div class="orbit two"></div>
+          <div class="hero-shield">
+            <svg class="state-icon state-ready" focusable="false"><use href="#i-shield"/></svg>
+            <svg class="state-icon state-paused" focusable="false"><use href="#i-pause"/></svg>
+            <svg class="state-icon state-loading" focusable="false"><use href="#i-clock"/></svg>
+            <svg class="state-icon state-stale" focusable="false"><use href="#i-alert"/></svg>
+          </div>
+          <span class="orbit-node n1"></span><span class="orbit-node n2"></span>
+        </div>
+        <div class="hero-content">
+          <div class="hero-label"><span class="status-dot" aria-hidden="true"></span><span id="hero-label">局域网专用出口</span></div>
+          <h2 id="heading">正在读取连接状态</h2>
+          <p id="hero-description">读取网关、程序分流与独立保护服务的状态。</p>
+        </div>
+        <div class="hero-actions">
+          <button id="toggle" class="button light" type="button">请稍候</button>
+          <button class="button ghost" type="button" data-page="network">管理出口 <svg aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg></button>
+        </div>
+      </div>
+      <div class="metrics">
+        <article class="card metric"><div class="metric-label">出口网关 <span class="mini-tag">LAN</span></div><strong id="gateway" class="mono">—</strong><div id="nic-summary" class="muted">等待网卡信息</div></article>
+        <article class="card metric"><div class="metric-label">最近验证的公网 IP</div><strong id="public-ip" class="mono">—</strong><div id="exit-location" class="muted">等待出口验证</div></article>
+        <article class="card metric"><div class="metric-label">本次连接流量</div><strong id="traffic-total">—</strong><div id="traffic-detail" class="muted">上传 — · 下载 —</div></article>
+      </div>
+    </div>
+
+    <div class="section-heading"><h2 id="tools-heading">专用程序</h2><span>按官方签名识别主程序</span></div>
+    <div class="programs" id="programs" role="group" aria-labelledby="tools-heading"></div>
+
+    <div class="route-note"><svg aria-hidden="true" focusable="false"><use href="#i-route"/></svg><p><strong>域名清单也在保护范围内</strong><span>网址、网络地址和程序名命中任意一条，就使用专用网关。</span></p><button class="text-button" type="button" data-page="protection">查看范围 <span aria-hidden="true">→</span></button></div>
+  </section>
+
+  <section class="page" id="page-network" aria-labelledby="page-title" hidden>
+    <div class="settings-layout">
+      <div class="card settings-card">
+        <div class="card-heading"><div class="icon-tile"><svg aria-hidden="true" focusable="false"><use href="#i-route"/></svg></div><div><h2>自定义出口网关</h2><p>填写当前局域网中能够访问互联网的网关地址。</p></div><span class="pill good">IPv4</span></div>
+        <div class="connection-strip"><div><span>当前网卡</span><strong id="settings-adapter">—</strong></div><div><span>本机地址</span><strong class="mono" id="settings-local">—</strong></div><div><span>正在使用</span><strong class="mono" id="settings-current">—</strong></div></div>
+        <form id="gateway-form">
+          <label for="gateway-input">网关 IPv4 地址</label>
+          <div class="input-row"><input id="gateway-input" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="15" placeholder="192.168.1.254" aria-describedby="gateway-help validation-result"><button id="validate" class="button secondary" type="submit">验证出口</button></div>
+          <p class="field-help" id="gateway-help">网关需要与当前网卡在同一子网。验证期间，现有连接继续使用原出口。</p>
+          <div id="validation-result" class="validation muted" role="status" aria-live="polite">先验证网关，确认实际公网出口后即可保存。</div>
+          <div class="form-footer"><p>切换出口时，专用连接会短暂重连。</p><button type="button" id="apply" class="button primary" aria-describedby="validation-result" disabled><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>保存并使用</button></div>
+        </form>
+      </div>
+      <div class="settings-aside">
+        <div class="card info-card"><h3>它会如何连接？</h3><div class="flow"><span>清单域名 / 专用程序</span><svg aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg><span>你设置的网关</span><svg aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg><span>互联网</span></div><p>这里只设置局域网网关，不需要 HTTP / SOCKS 端口。系统默认网关和 Clash 的系统代理设置保持不变。公网 IP 由该网关决定，可能随网络变化。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="page-protection" aria-labelledby="page-title" hidden>
+    <article class="card feed-card">
+      <div class="section-heading"><h2>规则更新</h2><span id="feed-badge" class="pill">读取中</span></div>
+      <p id="feed-message" aria-live="polite">正在读取规则状态…</p>
+      <div class="feed-controls"><button type="button" class="button secondary" id="feed-refresh">立即检查更新</button><label><input type="checkbox" id="feed-auto"> 每 6 小时自动检查</label></div>
+      <dl class="feed-info"><dt>下载出口</dt><dd id="feed-outlet">—</dd><dt>最近验证</dt><dd id="feed-time">—</dd><dt>规则指纹</dt><dd id="feed-revision">—</dd></dl>
+      <details><summary>查看规则来源</summary><code id="feed-url"></code></details>
+    </article>
+    <div class="check-panel">
+      <div class="card protection-banner"><div class="icon-tile"><svg aria-hidden="true" focusable="false"><use href="#i-shield"/></svg></div><div><h2 id="protection-heading">正在检查保护状态</h2><p>界面关闭后，独立保护服务仍会运行。</p></div><span id="protection-badge" class="pill muted">检查中</span></div>
+      <div class="card protection-list" id="protection-checks" role="group" aria-labelledby="protection-heading"></div>
+    </div>
+
+    <article class="card domain-card"><div class="section-heading"><h2>命中任意一条即分流</h2><span>IPv4</span></div>
+      <p class="field-help">目的地址、所属网络、程序名和网址分别匹配。</p>
+      <dl class="feed-info"><dt>IPv4 网段</dt><dd id="feed-ip">—</dd><dt>网络编号</dt><dd id="feed-asn">—</dd><dt>公告网段</dt><dd id="feed-announced">—</dd><dt>程序名</dt><dd id="feed-processes">—</dd></dl>
+      <details><summary id="feed-domain-count">网址清单</summary><p class="field-help">界面使用产品代称；后台仍按原始域名和程序名匹配。</p><div class="domain-list" id="domain-list"></div></details>
+    </article>
+    <div class="scope-note"><svg aria-hidden="true" focusable="false"><use href="#i-info"/></svg><div><h3>保护范围</h3><p>程序按自身名称和原有官方身份匹配。子进程按自己的规则判断。暂停连接时，后台会阻断目标流量；整个转发服务退出后，独立保护仍覆盖域名清单，清单外的程序流量不保证阻断。自行使用加密 DNS 且绕过系统代理的其他程序，可能绕过系统域名策略。</p></div></div>
+  </section>
+
+  <section class="page" id="page-diagnostics" aria-labelledby="page-title" hidden>
+    <div class="card diagnostic-card">
+      <div class="section-heading"><div><h2>连接检查</h2><p>通过当前网关验证 DNS、TLS 和实际公网出口。</p></div><button id="check" class="button secondary" type="button" aria-describedby="check-result"><svg aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg>重新检查</button></div>
+      <dl id="diagnostic-summary"></dl>
+      <p id="check-result" class="field-help" role="status"></p>
+    </div>
+    <div class="card info-card"><h3>程序兼容性记录</h3><p>在本机自行启动 高级 AI 桌面端 和原生 CC CLI，确认两者能正常联网。程序更新后，请重新检查使用结果。</p></div>
+    <details class="card raw-card"><summary>查看后台详细状态</summary><pre id="raw-state"></pre></details>
+  </section>
+
+  <section class="page" id="page-preferences" aria-labelledby="page-title" hidden>
+    <div class="card preference-card">
+      <div class="section-heading"><div><h2>启动与常驻</h2><p>设置客户端何时打开，以及关闭窗口后的行为。</p></div></div>
+      <div class="preference-row"><div><label id="startup-label" for="pref-startup">登录 Windows 后自动启动</label><p id="startup-help">自动打开客户端。后台连接和保护服务独立启动。</p></div><div class="preference-control"><span data-preference-status="appStartup">读取中</span><label class="preference-switch"><input id="pref-startup" type="checkbox" role="switch" data-preference="appStartup" aria-labelledby="startup-label" aria-describedby="startup-help" disabled><span aria-hidden="true"></span></label></div></div>
+      <div class="preference-row"><div><label id="hidden-label" for="pref-hidden">登录启动时隐藏到托盘</label><p id="hidden-help">登录时不弹出窗口；手动打开客户端仍会显示界面。</p></div><div class="preference-control"><span data-preference-status="startMinimized">读取中</span><label class="preference-switch"><input id="pref-hidden" type="checkbox" role="switch" data-preference="startMinimized" aria-labelledby="hidden-label" aria-describedby="hidden-help" disabled><span aria-hidden="true"></span></label></div></div>
+      <div class="preference-row"><div><label id="tray-label" for="pref-tray">关闭窗口时留在托盘</label><p id="tray-help">关闭后可从托盘重新打开；关闭此选项会退出界面，后台连接仍继续运行。</p></div><div class="preference-control"><span data-preference-status="closeToTray">读取中</span><label class="preference-switch"><input id="pref-tray" type="checkbox" role="switch" data-preference="closeToTray" aria-labelledby="tray-label" aria-describedby="tray-help" disabled><span aria-hidden="true"></span></label></div></div>
+      <p id="preferences-result" class="field-help" role="status" aria-live="polite">正在读取当前设置…</p>
+    </div>
+    <div class="card info-card"><h3>后台连接与保护</h3><p>后台服务随 Windows 启动，不依赖客户端是否打开。连接的启用或暂停状态由后台保存；重开界面不会把已暂停的连接自动恢复。</p><div class="preference-service"><span>后台连接状态</span><span id="preferences-connection" class="pill muted">正在读取</span><button class="text-button" type="button" data-page="overview">前往连接概览 <span aria-hidden="true">→</span></button></div><p class="field-help">旧版的“启动后恢复上次连接”和“连接失效后自动重试”属于旧连接方式。当前版本由后台服务管理连接检查与恢复，因此不再提供这两个客户端开关。</p></div>
+  </section>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+</main><script src="compatibility-browser.js"></script><script src="renderer.cjs"></script></body></html>

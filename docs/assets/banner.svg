@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="340" gradientUnits="userSpaceOnUse"><stop stop-color="#101E3D"/><stop offset="1" stop-color="#1C4A78"/></linearGradient>
+    <linearGradient id="line" x1="880" y1="175" x2="1170" y2="175" gradientUnits="userSpaceOnUse"><stop stop-color="#80BFFF"/><stop offset="1" stop-color="#89E4CD"/></linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" stroke="#FFFFFF" stroke-opacity=".045"/></pattern>
+  </defs>
+  <rect width="1280" height="340" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="340" rx="24" fill="url(#grid)"/>
+  <circle cx="1125" cy="160" r="180" stroke="#85C8FF" stroke-opacity=".12"/>
+  <circle cx="1125" cy="160" r="135" stroke="#85C8FF" stroke-opacity=".12"/>
+  <rect x="54" y="48" width="174" height="29" rx="14.5" fill="#D5E8FF" fill-opacity=".12"/>
+  <circle cx="72" cy="62.5" r="4" fill="#8FE0C6"/>
+  <text x="85" y="67" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="600" letter-spacing="2" fill="#C7DEFF">LAN · WINDOWS</text>
+  <text x="52" y="154" font-family="Segoe UI,Microsoft YaHei,Arial,sans-serif" font-size="52" font-weight="700" letter-spacing="-1.8" fill="#FFFFFF">高级 AI 专用网络</text>
+  <text x="55" y="203" font-family="Segoe UI,Microsoft YaHei,Arial,sans-serif" font-size="24" fill="#C4D7EF">让 高级 AI 的流量走你指定的局域网出口</text>
+  <text x="55" y="273" font-family="Segoe UI,Arial,sans-serif" font-size="14" letter-spacing="1" fill="#A3BBD7">DESKTOP + CLI</text>
+  <circle cx="205" cy="268" r="2.5" fill="#7793B7"/>
+  <text x="224" y="273" font-family="Segoe UI,Microsoft YaHei,Arial,sans-serif" font-size="14" fill="#A3BBD7">规则自动更新</text>
+  <circle cx="342" cy="268" r="2.5" fill="#7793B7"/>
+  <text x="361" y="273" font-family="Segoe UI,Microsoft YaHei,Arial,sans-serif" font-size="14" fill="#A3BBD7">Clash 兼容</text>
+  <path d="M866 126H955Q986 126 986 157V184Q986 215 1017 215H1124" stroke="url(#line)" stroke-width="3"/>
+  <path d="M866 224H921Q951 224 951 194V155Q951 126 982 126H1124" stroke="url(#line)" stroke-opacity=".35" stroke-width="2"/>
+  <rect x="803" y="94" width="70" height="64" rx="16" fill="#193658" stroke="#6689B2"/>
+  <rect x="821" y="111" width="34" height="22" rx="3" stroke="#C8DEFF" stroke-width="2"/><path d="M832 141H844M838 134V140" stroke="#C8DEFF" stroke-width="2"/>
+  <rect x="803" y="192" width="70" height="64" rx="16" fill="#193658" stroke="#6689B2"/>
+  <path d="M824 211L834 221L824 231M840 231H851" stroke="#C8DEFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="1093" y="160" width="91" height="91" rx="23" fill="#183F58" stroke="#8BD5C4"/>
+  <path d="M1139 180L1156 187V201C1156 213 1148 221 1139 225C1130 221 1122 213 1122 201V187L1139 180Z" stroke="#A0EFDC" stroke-width="2.5"/>
+  <path d="M1130 201L1136 207L1148 194" stroke="#A0EFDC" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="1127" cy="126" r="5" fill="#95E3CC"/>
+</svg>

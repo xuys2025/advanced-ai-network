@@ -1,0 +1,10 @@
+{
+  "version": "0.6.9-lan.1",
+  "platform": "Windows x64",
+  "mode": "lan-gateway",
+  "contains_source": true,
+  "npcap_bundled": false,
+  "gateway_preconfigured": false,
+  "new_machine_installation_tested": false,
+  "repository": "https://github.com/xuys2025/advanced-ai-network"
+}

@@ -1,0 +1,14 @@
+构建与自行修改
+
+完整步骤见 docs/BUILDING.md。
+在 Sources 目录执行 Build.ps1 -ManagedOnly，可编译并测试 C# 服务。
+需要修改原生转发时，使用 Build.ps1 -Zig <zig.exe 路径>，Zig 版本为 0.15.1。
+执行 Update-Payload.ps1 将构建结果复制到解压包，保存工作并退出 高级 AI 后再运行 Install.cmd。
+修改界面可直接编辑 Sources/client，然后复制到 App/resources/app。
+
+GitHub 仓库提供本项目源码、修改后的 ProxyBridge 和 WinDivert SDK。
+Windows 包内同时附有项目源码，完整第三方源码另行下载。
+https://github.com/xuys2025/advanced-ai-network/releases/latest/download/AdvancedAINetwork-ThirdParty-Sources.zip
+将第三方源码包解压到 Windows 包根目录，再运行 Restore-ThirdParty.ps1，校验并还原 Sources/third_party 下的源码和依赖归档。
+
+源码分享说明见 SOURCE-NOTICE.txt。第三方组件按各自原有许可证使用。
