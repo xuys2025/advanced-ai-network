@@ -42,7 +42,11 @@ if($keywordMode -and (Test-Path -LiteralPath $managed)){
 $policyDigest=[Security.Cryptography.SHA256]::Create()
 try{$policyHash=([BitConverter]::ToString($policyDigest.ComputeHash([Text.Encoding]::ASCII.GetBytes(($policyDomains -join "`n"))))).Replace('-','').ToLowerInvariant()}finally{$policyDigest.Dispose()}
 function OwnedRules { @(Get-DnsClientNrptRule | Where-Object {$_.Comment -eq $comment}) }
-function TunLoopIndex { (Get-NetIPAddress -AddressFamily IPv4 -IPAddress '127.0.0.1').InterfaceIndex }
+$script:loopIfIndex=$null
+function TunLoopIndex {
+    if($null -eq $script:loopIfIndex){$script:loopIfIndex=(Get-NetIPAddress -AddressFamily IPv4 -IPAddress '127.0.0.1' -ErrorAction Stop).InterfaceIndex}
+    $script:loopIfIndex
+}
 function TunFallback([string]$Store){@(Get-NetRoute -DestinationPrefix $tunPrefix -PolicyStore $Store -ErrorAction SilentlyContinue | Where-Object {$_.InterfaceIndex -eq (TunLoopIndex) -and $_.NextHop -eq '0.0.0.0' -and $_.RouteMetric -eq 4096})}
 function AssertTunRangeAvailable {
     $owned=Test-Path -LiteralPath $tunMarker
@@ -131,7 +135,7 @@ if($Action -eq 'Disable'){
     exit 0
 }
 # Never replace existing namespace policy installed by another VPN or administrator.
-AssertNoConflicts
+if($Action -ne 'Repair'){AssertNoConflicts}
 function RepairRules {
     $lockPath=Join-Path $guardPath 'policy.lock'
     $policyLock=$null
@@ -153,10 +157,16 @@ function RepairRules {
     }finally{$policyLock.Dispose()}
 }
 if($Action -eq 'Repair'){
-    if(!(Test-Path -LiteralPath $enabledMarker)){exit 0}
+    if(!(Test-Path -LiteralPath $enabledMarker)){throw 'Domain protection is disabled.'}
+    [Console]::Error.WriteLine('guard-stage DNS policy')
     RepairRules
+    [Console]::Error.WriteLine('guard-stage protected routes and firewall')
     RepairTunSafety
-    Status
+    [Console]::Error.WriteLine('guard-stage effective DNS verification')
+    $result=Status
+    $coverage=$result|ConvertFrom-Json
+    if($coverage.required -lt 1 -or $coverage.covered -ne $coverage.required){throw 'Effective protected DNS rules are incomplete.'}
+    $result
     exit 0
 }
 $sourceExe=Join-Path $PSScriptRoot 'AdvancedAINetworkGuard.exe'

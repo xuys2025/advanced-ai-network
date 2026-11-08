@@ -68,8 +68,31 @@ public static class Data {
     }
     public static string Hash(string path) {using(var file=File.OpenRead(path))using(var hash=SHA256.Create())return BitConverter.ToString(hash.ComputeHash(file)).Replace("-","").ToLowerInvariant();}
     public static string PowerShell(string path,string action) {
-        var start=new ProcessStartInfo("powershell.exe","-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""+path+"\" -Action "+action){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8};
-        using(var process=Process.Start(start)){var output=process.StandardOutput.ReadToEndAsync();var error=process.StandardError.ReadToEndAsync();if(!process.WaitForExit(15000)){try{process.Kill();}catch{}throw new Exception("系统操作超时，原有保护规则保留。");}if(!Task.WaitAll(new Task[]{output,error},2000))throw new Exception("系统状态输出超时。");if(process.ExitCode!=0)throw new Exception(error.Result.Length>0?error.Result:"系统操作未完成。");return output.Result;}
+        return PowerShell(path,action,15000,CancellationToken.None);
+    }
+    public static string PowerShell(string path,string action,int timeoutMs,CancellationToken token) {
+        token.ThrowIfCancellationRequested();
+        string shell=Path.Combine(Environment.SystemDirectory,@"WindowsPowerShell\v1.0\powershell.exe");
+        var start=new ProcessStartInfo(shell,"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""+path+"\" -Action "+action){
+            UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,
+            StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
+        using(var process=Process.Start(start)){
+            var output=process.StandardOutput.ReadToEndAsync();var error=process.StandardError.ReadToEndAsync();
+            var time=Stopwatch.StartNew();
+            while(!process.WaitForExit(100)){
+                if(!token.IsCancellationRequested && time.ElapsedMilliseconds<timeoutMs)continue;
+                try{process.Kill();}catch(InvalidOperationException){}
+                if(!process.WaitForExit(3000))throw new IOException("维护子进程未按时退出。");
+                token.ThrowIfCancellationRequested();
+                string stage="启动脚本";
+                if(error.Wait(1000))foreach(string line in error.Result.Split('\n'))
+                    if(line.StartsWith("guard-stage "))stage=line.Trim().Substring(12);
+                throw new TimeoutException(action+" 超时："+stage+"，耗时 "+time.ElapsedMilliseconds+" ms");
+            }
+            if(!Task.WaitAll(new Task[]{output,error},2000))throw new IOException("系统状态输出超时。");
+            if(process.ExitCode!=0)throw new IOException(error.Result.Length>0?error.Result:"系统操作未完成。");
+            return output.Result;
+        }
     }
 }
 }

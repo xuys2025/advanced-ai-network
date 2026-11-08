@@ -5,14 +5,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $package=$PSScriptRoot;$name='AdvancedAINetworkLanGateway';$root=Join-Path $env:ProgramData $name
-$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.1'
+$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.4'
 $runKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$result=[ordered]@{success=$false;version='0.6.9-lan.1';check_only=[bool]$CheckOnly}
+$result=[ordered]@{success=$false;version='0.6.9-lan.4';check_only=[bool]$CheckOnly}
 $backup=$null;$stopped=$false;$created=$false;$oldRun=$null;$uiStopped=$false;$oldRoot=$null;$oldLauncher=$null
 function Save-Json($path,$data){[IO.File]::WriteAllText($path,($data|ConvertTo-Json -Depth 15),[Text.UTF8Encoding]::new($false))}
 function No-Link([string]$path){if((Test-Path -LiteralPath $path)-and((Get-Item -LiteralPath $path -Force).Attributes-band[IO.FileAttributes]::ReparsePoint)){throw ('目录不能是链接：'+$path)}}
 function Driver-Check([string]$path){if(!(Test-Path -LiteralPath $path)-or(Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant()-ne'8da085332782708d8767bcace5327a6ec7283c17cfb85e40b03cd2323a90ddc2'-or(Get-AuthenticodeSignature -LiteralPath $path).Status-ne'Valid'){throw 'WinDivert 驱动版本或签名不符；不会覆盖其他软件的驱动。'}}
-function Healthy([bool]$expected){$end=[DateTime]::UtcNow.AddSeconds(50);do{Start-Sleep -Milliseconds 500;try{$s=Get-Content (Join-Path $root 'status.json') -Raw -Encoding UTF8|ConvertFrom-Json;if($s.ready-eq$expected-and$s.capturing-and([DateTime]::UtcNow-[DateTime]::Parse($s.updated_utc).ToUniversalTime()).TotalSeconds-lt 3){return $s}}catch{}}while([DateTime]::UtcNow-lt$end);throw '网关服务未就绪，请查看 ProgramData\AdvancedAINetworkLanGateway\status.json。'}
+function Healthy([bool]$expected){$end=[DateTime]::UtcNow.AddSeconds(50);do{Start-Sleep -Milliseconds 500;try{$s=Get-Content (Join-Path $root 'status.json') -Raw -Encoding UTF8|ConvertFrom-Json;if($s.ready-eq$expected-and$s.version-eq$result.version-and$s.process_ip_guard_live-and$s.guard_protected-and$s.capturing-and([DateTime]::UtcNow-[DateTime]::Parse($s.updated_utc).ToUniversalTime()).TotalSeconds-lt 3){return $s}}catch{}}while([DateTime]::UtcNow-lt$end);throw '网关服务未就绪，请查看 ProgramData\AdvancedAINetworkLanGateway\status.json。'}
 try{
     if(![Environment]::Is64BitOperatingSystem-or![Environment]::Is64BitProcess){throw '请使用 Windows 10/11 x64 和 64 位 PowerShell。'}
     $admin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -59,6 +59,11 @@ try{
     foreach($sid in @('S-1-5-18','S-1-5-32-544')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
     $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($owner),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'));Set-Acl -LiteralPath $root -AclObject $acl
     foreach($seed in @(@('managed-rules.json','RuleSeed'),@('managed-domains.json','DomainSeed'))){$seedPath=Join-Path $root $seed[0];if(!(Test-Path -LiteralPath $seedPath)){[IO.File]::WriteAllText($seedPath,(Get-AiCompatibility $seed[1]),[Text.UTF8Encoding]::new($false))}}
+    $rulesFile=Join-Path $root 'managed-rules.json'
+    $policyTool=Join-Path $package 'Tools\GuardPolicyTool.exe'
+    & $policyTool prepare $rulesFile
+    if($LASTEXITCODE-ne 0){throw 'Windows 持久阻断未通过核验，安装已停止。'}
+    if($existing){$backup=Join-Path $root ('backup-'+(Get-Date -Format yyyyMMdd-HHmmss));$null=New-Item -ItemType Directory -Path $backup;foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','config.json','intent.json')){if(Test-Path (Join-Path $root $file)){Copy-Item (Join-Path $root $file) $backup}};Stop-Service $name -ErrorAction Stop;$stopped=$true}
     $guard=(& (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Status)|ConvertFrom-Json
     if(!$guard.protected-or!$guard.tun_ready-or!$guard.dns_64_65_blocked-or!$guard.keyword_system_enabled-or!(Test-Path -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe'))-or(Get-FileHash -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe')).Hash-ne(Get-FileHash -LiteralPath (Join-Path $package 'Guard\AdvancedAINetworkGuard.exe')).Hash){
         & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Enable -SystemKeywords
@@ -66,7 +71,6 @@ try{
         $deadline=[DateTime]::UtcNow.AddSeconds(40);do{Start-Sleep -Seconds 1;$guard=(& (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Status)|ConvertFrom-Json}while(!$guard.tun_ready-and[DateTime]::UtcNow-lt$deadline)
         if(!$guard.protected-or!$guard.tun_ready){throw '请等待域名保护服务恢复后重试。'}
     }
-    if($existing){$backup=Join-Path $root ('backup-'+(Get-Date -Format yyyyMMdd-HHmmss));$null=New-Item -ItemType Directory -Path $backup;foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','config.json','intent.json')){if(Test-Path (Join-Path $root $file)){Copy-Item (Join-Path $root $file) $backup}};Stop-Service $name -ErrorAction Stop;$stopped=$true}
     if($oldRoot){$owned=@(Get-CimInstance Win32_Process|Where-Object{$_.ExecutablePath-and$_.ExecutablePath.StartsWith($oldRoot+'\',[StringComparison]::OrdinalIgnoreCase)});foreach($p in $owned|Sort-Object @{Expression={if($_.Name-eq'AdvancedAINetworkLauncher.exe'){0}else{1}}}){Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue};$uiStopped=$true}
     $null=New-Item -ItemType Directory -Path $appRoot -Force
     foreach($item in Get-ChildItem (Join-Path $package 'App')){Copy-Item -LiteralPath $item.FullName -Destination $appRoot -Recurse -Force}
@@ -76,7 +80,10 @@ try{
     Save-Json (Join-Path $root 'intent.json') @{enabled=$true}
     if(!$driver){& "$env:WINDIR\System32\sc.exe" create WinDivert type= kernel start= demand binPath= ('"'+(Join-Path $root 'WinDivert64.sys')+'"')|Out-Null;if($LASTEXITCODE-ne 0){throw '无法注册已签名的 WinDivert 驱动。'}}
     if((Get-Service WinDivert).Status-ne'Running'){Start-Service WinDivert}
-    if(!$existing){& "$env:WINDIR\System32\sc.exe" create $name type= own start= auto binPath= ('"'+(Join-Path $root 'GatewayService.exe')+'"') depend= 'BFE/MpsSvc/AdvancedAINetworkDomainGuard' DisplayName= '高级 AI 专用网络 LAN Gateway'|Out-Null;if($LASTEXITCODE-ne 0){throw '服务注册失败。'};$created=$true}else{Set-Service $name -StartupType Automatic}
+    if(!$existing){& "$env:WINDIR\System32\sc.exe" create $name type= own start= auto binPath= ('"'+(Join-Path $root 'GatewayService.exe')+'"') depend= 'BFE/MpsSvc/AdvancedAINetworkDomainGuard/WinDivert/npcap' DisplayName= '高级 AI 专用网络 LAN Gateway'|Out-Null;if($LASTEXITCODE-ne 0){throw '服务注册失败。'};$created=$true}else{
+        & "$env:WINDIR\System32\sc.exe" config $name start= auto depend= 'BFE/MpsSvc/AdvancedAINetworkDomainGuard/WinDivert/npcap'|Out-Null
+        if($LASTEXITCODE-ne 0){throw '无法更新转发服务依赖。'}
+    }
     & "$env:WINDIR\System32\sc.exe" failure $name reset= 86400 actions= 'restart/3000/restart/5000/restart/15000'|Out-Null
     if($LASTEXITCODE-ne 0){throw '服务恢复策略设置失败。'}
     & "$env:WINDIR\System32\sc.exe" failureflag $name 1|Out-Null;if($LASTEXITCODE-ne 0){throw '服务恢复标志设置失败。'}
@@ -90,13 +97,23 @@ try{
     $shell=New-Object -ComObject WScript.Shell
     try{$shortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) '高级 AI 专用网络.lnk'));$shortcut.TargetPath=$launcher;$shortcut.WorkingDirectory=$appRoot;$shortcut.Save()}finally{[Runtime.InteropServices.Marshal]::ReleaseComObject($shell)|Out-Null}
     $null=New-Item -ItemType Directory -Path (Join-Path $env:LOCALAPPDATA 'AdvancedAIPrivateNetwork') -Force
+    try{
+        & (Join-Path $package 'Observer\Install.ps1') -ExpectedGateway $Gateway
+        $result.observer_installed=$true
+    }catch{
+        $result.observer_installed=$false;$result.observer_error=$_.Exception.Message
+        Write-Warning ('联网保护已就绪，独立托盘提醒安装未完成：'+$result.observer_error)
+    }
     $result.success=$true;$result.gateway=$Gateway;$result.exit=$state.last_exit;$result.client=$appRoot;$result.backup=$backup
     Write-Host '安装完成。请从桌面快捷方式打开界面，并按说明合并 Clash 规则。' -ForegroundColor Green
     Write-Host '安装器没有启动真实 高级 AI 程序，也没有修改 Clash、系统默认网关或网卡 IPv6 设置。'
 }catch{
     $result.error=$_.Exception.Message;$result.line=$_.InvocationInfo.ScriptLineNumber
-    if($stopped-and$backup){try{Stop-Service $name -ErrorAction SilentlyContinue;foreach($file in Get-ChildItem $backup -File){Copy-Item -LiteralPath $file.FullName -Destination $root -Force};Start-Service $name;$result.restored_previous_service=$true}catch{$result.restore_error=$_.Exception.Message}}
-    elseif($created){Stop-Service $name -ErrorAction SilentlyContinue;Set-Service $name -StartupType Manual -ErrorAction SilentlyContinue}
+    if($stopped -or $created){
+        Stop-Service $name -ErrorAction SilentlyContinue
+        Set-Service $name -StartupType Manual -ErrorAction SilentlyContinue
+        $result.backup=$backup
+    }
     if($oldRun){Set-ItemProperty $runKey -Name AdvancedAIPrivateNetwork -Value $oldRun}
     Write-Host ('安装未完成：'+$result.error) -ForegroundColor Red
     Write-Host '已有域名保护会保留。修好配置后重跑安装；要解除限制请阅读 Uninstall.ps1 的说明。'

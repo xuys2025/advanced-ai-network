@@ -51,7 +51,7 @@ namespace AdvancedAINetwork.Gateway {
             handle = Divert.WinDivertOpen(filter, 0, 321, 16);
             if (handle == new IntPtr(-1)) {
                 int error = Marshal.GetLastWin32Error(); activeRoute.Dispose();
-                throw new Win32Exception(error, "Cannot open the gateway transport filter.");
+                throw new Win32Exception(error, "Cannot open the gateway transport filter (Win32 "+error+"): "+new Win32Exception(error).Message);
             }
             worker = Task.Factory.StartNew(Receive, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             sweeper=new Timer(_=>Sweep(),null,15000,15000);

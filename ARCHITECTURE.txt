@@ -8,6 +8,9 @@
 6. Clash 合并脚本从本机 17894 端口获取已验证规则，命中时发往 17891 专用入口。
 7. RuleFeed 每 6 小时通过已选网关下载原规则与 ASN 前缀，校验通过后替换，失败保留旧规则。
 
+8. WFP 持久过滤器按程序文件名和规则网段阻断连接。网关服务持有临时放行会话，进程退出后由 Windows 回收。程序的 IPv6 连接持续阻断。
+9. 域名守护在后台检查 DNS 与路由，检查运行期间继续发送心跳。最近一次成功验证超过 45 秒即撤销转发，已有中继连接随之关闭。
+
 关键入口
 Sources/gateway/GatewayService.cs      后台生命周期、暂停、恢复和状态
 Sources/gateway/ProcessIdentity.cs     官方程序、内置 CLI 路径与签名
@@ -17,6 +20,8 @@ Sources/gateway/GatewayProxy.cs        本机 HTTP/SOCKS 代理和双向转发
 Sources/gateway/GatewayTransport.cs    连接归属、IPv4 匹配和转发
 Sources/gateway/GatewayControl.cs      命名管道、网关验证与切换
 Sources/guard                         DNS、动态域名策略和 TUN 守护
+Sources/gateway/GatewayFailClosed.cs   Windows 持久阻断与临时放行
+Sources/observer                       独立托盘提醒、出口验证与紧急暂停
 Sources/native                        C# 原生桥接和签名校验
 Sources/third_party/ProxyBridge/src    修改后的 C 转发实现
 Sources/client                        本地 Electron 界面

@@ -9,7 +9,12 @@ public class ManagedRulesTests {
     static bool Match(ManagedRules p,string ip){return p.MatchesIp(IPAddress.Parse(ip).GetAddressBytes(),0);}
     public static int Main(string[] args){
         var raw=File.ReadAllText(args[0]);var p=ManagedRules.Parse(raw);
-        p.announced=ManagedRules.ActiveV4(399358,File.ReadAllText(args[1])).OrderBy(x=>x,StringComparer.Ordinal).ToArray();p.Prepare();
+        var collected=new DateTime(2026,11,3,8,0,0,DateTimeKind.Utc);
+        string announcement=File.ReadAllText(args[1]);
+        p.announced=ManagedRules.ActiveV4(399358,announcement,collected).OrderBy(x=>x,StringComparer.Ordinal).ToArray();p.Prepare();
+        bool expired=false;
+        try{ManagedRules.ActiveV4(399358,announcement,collected.AddDays(4)).ToArray();}catch(InvalidDataException){expired=true;}
+        Check(expired,"Expired ASN announcement was accepted");
         Check(Match(p,"160.79.104.0")&&Match(p,"160.79.111.255")&&!Match(p,"160.79.103.255")&&!Match(p,"160.79.112.0"),"CIDR edges");
         Check(p.MatchesProcess(AiCompatibility.S_25d2fedb323143)&&p.MatchesProcess(AiCompatibility.S_0615570f9ea136)&&p.MatchesProcess("CoWoRk-SvC.ExE")&&!p.MatchesProcess(AiCompatibility.S_0e36ada40747b4),"program OR");
         var copy=ManagedRules.Parse(raw);copy.announced=new[]{"198.51.100.0/24"};copy.Prepare();

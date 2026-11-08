@@ -5,7 +5,7 @@ $result=[ordered]@{success=$false;read_only=$true;checked_utc=[DateTime]::UtcNow
 try{
     $state=Get-Content (Join-Path $env:ProgramData 'AdvancedAINetworkLanGateway\status.json') -Raw -Encoding UTF8|ConvertFrom-Json
     $result.state=$state
-    if(!$state.ready-or([DateTime]::UtcNow-[DateTime]::Parse($state.updated_utc).ToUniversalTime()).TotalSeconds-gt 5){throw 'The gateway is not ready or its heartbeat is stale.'}
+    if(!$state.ready-or !$state.process_ip_guard_live -or !$state.guard_protected -or $state.exit_protection -ne 'persistent-wfp' -or ([DateTime]::UtcNow-[DateTime]::Parse($state.updated_utc).ToUniversalTime()).TotalSeconds-gt 5){throw 'The gateway is not ready or its heartbeat is stale.'}
     & (Join-Path $PSScriptRoot 'Tools\ProtectionAudit.exe') ($Report+'.dns.json');if($LASTEXITCODE-ne 0){throw 'DNS verification failed.'}
     $result.dns=Get-Content ($Report+'.dns.json') -Raw -Encoding UTF8|ConvertFrom-Json
     $policy=(& (Join-Path $PSScriptRoot 'Guard\Guard-Setup.ps1') -Action Status)|ConvertFrom-Json;$result.domain_policy=$policy

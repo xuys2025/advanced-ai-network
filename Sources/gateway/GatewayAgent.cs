@@ -15,7 +15,21 @@ public static class GatewayAgent {
     static volatile bool running=true;
     static DateTime heartbeat=DateTime.UtcNow;
     static void Send(object value){lock(sync){Console.WriteLine(Json.Serialize(value));Console.Out.Flush();}}
-    static object State(){try{using(var file=new FileStream(Path.Combine(Root,"status.json"),FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))using(var reader=new StreamReader(file)){var state=Json.Deserialize<Dictionary<string,object>>(reader.ReadToEnd());DateTime at=DateTime.Parse(Convert.ToString(state["updated_utc"])).ToUniversalTime();if(Math.Abs((DateTime.UtcNow-at).TotalSeconds)>5){state["ready"]=false;state["capturing"]=false;state["guard_protected"]=false;state["ipv6_firewall_ready"]=false;state["stale"]=true;state["message"]="后台状态已过期，正在等待服务恢复。";}return state;}}catch(Exception error){return new{ready=false,stale=true,version="0.6.8-lan.1",message="后台尚未就绪："+error.Message};}}
+    static Dictionary<string,object> ReadState(){
+        using(var file=new FileStream(Path.Combine(Root,"status.json"),FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))
+        using(var reader=new StreamReader(file))return Json.Deserialize<Dictionary<string,object>>(reader.ReadToEnd());
+    }
+    static object State(){
+        try{
+            var state=StatusSnapshotFile.Read(ReadState);
+            DateTime at=DateTime.Parse(Convert.ToString(state["updated_utc"])).ToUniversalTime();
+            if(Math.Abs((DateTime.UtcNow-at).TotalSeconds)>5){
+                state["ready"]=false;state["capturing"]=false;state["guard_protected"]=false;
+                state["ipv6_firewall_ready"]=false;state["stale"]=true;state["message"]="后台状态已过期，正在等待服务恢复。";
+            }
+            return state;
+        }catch(Exception error){return new{ready=false,stale=true,message="后台状态暂不可读："+error.Message};}
+    }
     static object Command(string command){using(var pipe=new NamedPipeClientStream(".","AdvancedAINetworkLanGateway.Control",PipeDirection.InOut,PipeOptions.Asynchronous)){pipe.Connect(3000);byte[] value=Encoding.UTF8.GetBytes(command+"\n");pipe.Write(value,0,value.Length);var read=Task.Run(()=>{var bytes=new List<byte>();for(int i=0;i<131072;i++){int b=pipe.ReadByte();if(b<0)throw new EndOfStreamException();if(b==10)return Encoding.UTF8.GetString(bytes.ToArray());bytes.Add((byte)b);}throw new IOException("后台响应过长。");});if(!read.Wait(5000))throw new IOException("后台命令超时。");var result=Json.Deserialize<Dictionary<string,object>>(read.GetAwaiter().GetResult());object error;if(result.TryGetValue("error",out error))throw new IOException(Convert.ToString(error));return result;}}
     public static int Main(string[] args){Console.InputEncoding=new UTF8Encoding(false);Console.OutputEncoding=new UTF8Encoding(false);
         if(args.Length==2&&args[0]=="--command"){try{Send(Command(args[1]));return 0;}catch(Exception error){Console.Error.WriteLine(error.Message);return 1;}}

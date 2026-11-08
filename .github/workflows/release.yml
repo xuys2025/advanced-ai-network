@@ -1,0 +1,46 @@
+name: Build Windows release
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: powershell
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check release tag and draft
+        run: |
+          $version=(Get-Content PACKAGE.json -Raw | ConvertFrom-Json).version
+          if($env:GITHUB_REF -cne "refs/tags/v$version"){throw 'Run on the matching release tag.'}
+          $draft=gh release view $env:GITHUB_REF_NAME --json isDraft --jq .isDraft
+          if($LASTEXITCODE -or $draft -ne 'true'){throw 'Expected a draft release.'}
+      - name: Rebuild managed programs and run regression tests
+        run: |
+          & .\Sources\Build.ps1 -ManagedOnly
+          node Clash.Tests.cjs
+          if($LASTEXITCODE){throw 'Clash tests failed.'}
+      - name: Verify abrupt gateway exit on the disposable runner
+        run: .\Sources\tests\Test-Lease.ps1
+      - name: Fetch verified runtime and corresponding sources
+        run: |
+          gh release download v0.6.9-lan.1 -p '*.zip' -D "$env:RUNNER_TEMP\baseline"
+          if($LASTEXITCODE){throw 'Baseline release download failed.'}
+          python .github/scripts/package.py prepare "$env:RUNNER_TEMP\baseline" "$env:RUNNER_TEMP\package"
+          if($LASTEXITCODE){throw 'Package preparation failed.'}
+          & .\Sources\Update-Payload.ps1 -PackageRoot "$env:RUNNER_TEMP\package"
+      - name: Verify contents and upload draft assets
+        run: |
+          python .github/scripts/package.py pack "$env:RUNNER_TEMP\baseline" "$env:RUNNER_TEMP\package" "$env:RUNNER_TEMP\release"
+          if($LASTEXITCODE){throw 'Archive verification failed.'}
+          & "$env:RUNNER_TEMP\package\Verify-Package.ps1"
+          $assets=(Get-ChildItem -File "$env:RUNNER_TEMP\release").FullName
+          gh release upload $env:GITHUB_REF_NAME $assets --clobber
+          if($LASTEXITCODE){throw 'Release upload failed.'}
+          Get-Content "$env:RUNNER_TEMP\release\SHA256SUMS.txt"

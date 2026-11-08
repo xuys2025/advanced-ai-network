@@ -17,8 +17,9 @@ using System.Web.Script.Serialization;
 using AdvancedAINetwork.Gateway;
 
 public sealed partial class GatewayService : ServiceBase {
-    public const string Name = "AdvancedAINetworkLanGateway", Version = "0.6.9-lan.1", PipeName = "AdvancedAINetworkLanGateway.Control";
+    public const string Name = "AdvancedAINetworkLanGateway", Version = "0.6.9-lan.4", PipeName = "AdvancedAINetworkLanGateway.Control";
     RuleFeed rules;
+    readonly GatewayFailClosed networkGuard = new GatewayFailClosed();
     ConnectionTimingLog connectionTiming;
     static readonly string Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),Name);
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
@@ -35,16 +36,24 @@ public sealed partial class GatewayService : ServiceBase {
     static bool Flag(Dictionary<string,object> d,string key) { object value;return d.TryGetValue(key,out value)&&value is bool&&(bool)value; }
     static void Atomic(string path,object data) { string temp=path+".tmp";File.WriteAllText(temp,Json.Serialize(data),new UTF8Encoding(false));if(File.Exists(path))File.Replace(temp,path,null);else File.Move(temp,path); }
     protected override void OnStart(string[] args) { ThreadPool.SetMinThreads(64,64);worker=Task.Run((Action)Run); }
-    protected override void OnStop() { RequestAdditionalTime(20000);ready=false;stopping.Set();lock(sync){if(pipe!=null)pipe.Dispose();}if(worker!=null&&!worker.Wait(15000))Environment.Exit(1); }
+    protected override void OnStop() { RequestAdditionalTime(20000);lock(sync){stopping.Set();networkGuard.Pause();ready=false;if(pipe!=null)pipe.Dispose();}if(worker!=null&&!worker.Wait(15000))Environment.Exit(1); }
     protected override void OnShutdown() { OnStop(); }
     bool Guard() {
-        try { var state=ReadJson(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"AdvancedAINetworkGuard","guard-status.json"));DateTime time;
+        try { var state=StatusSnapshotFile.Read(()=>ReadJson(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"AdvancedAINetworkGuard","guard-status.json")));DateTime time;
             bool fresh=DateTime.TryParse(Str(state,"updated_utc"),out time)&&Math.Abs((DateTime.UtcNow-time.ToUniversalTime()).TotalSeconds)<15;
-            guardStatus=new{fresh=fresh,tun_ready=fresh&&Flag(state,"tun_ready"),dns_64_65_blocked=fresh&&Flag(state,"dns_64_65_blocked"),network_safety_ready=fresh&&Flag(state,"network_safety_ready"),updated_utc=Str(state,"updated_utc")};
-            return fresh&&Flag(state,"tun_ready")&&Flag(state,"dns_64_65_blocked")&&Flag(state,"network_safety_ready");
-        }catch{guardStatus=new{fresh=false};return false;}
+            DateTimeOffset expiry;
+            bool verified=Flag(state,"network_safety_ready") && Str(state,"maintenance_revision")=="2"
+                && DateTimeOffset.TryParse(Str(state,"safety_valid_until_utc"),out expiry) && expiry>DateTimeOffset.UtcNow;
+            guardStatus=new{fresh=fresh,tun_ready=fresh&&Flag(state,"tun_ready"),dns_64_65_blocked=fresh&&Flag(state,"dns_64_65_blocked"),network_safety_ready=fresh&&verified,updated_utc=Str(state,"updated_utc"),maintenance_error=Str(state,"maintenance_error")};
+            return fresh&&Flag(state,"tun_ready")&&Flag(state,"dns_64_65_blocked")&&verified;
+        }catch(Exception ex){guardStatus=new{fresh=false,read_error=ex.GetType().Name,native_error=ex.HResult&0xffff};return false;}
     }
-    static int Tun() { foreach(var nic in NetworkInterface.GetAllNetworkInterfaces())if(nic.Name=="AdvancedAINetwork-TUN")foreach(var ip in nic.GetIPProperties().UnicastAddresses)if(ip.Address.ToString()=="172.31.254.1")return nic.GetIPProperties().GetIPv4Properties().Index;throw new IOException("Domain protection TUN is unavailable."); }
+    bool BindRelay(){
+        foreach(var nic in NetworkInterface.GetAllNetworkInterfaces())if(nic.Name=="AdvancedAINetwork-TUN")
+            foreach(var ip in nic.GetIPProperties().UnicastAddresses)if(ip.Address.ToString()=="172.31.254.1")
+                return NativeBridge.SetRelayEndpoint(BitConverter.ToUInt32(ip.Address.GetAddressBytes(),0),(uint)nic.GetIPProperties().GetIPv4Properties().Index);
+        return false;
+    }
     void Firewall() {
         identity.RefreshInstalled();
         dynamic policy=Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FwPolicy2"));
@@ -67,10 +76,10 @@ public sealed partial class GatewayService : ServiceBase {
         }finally{Marshal.ReleaseComObject(policy);}
     }
     object Snapshot() {
-        return new {version=Version,service_pid=Process.GetCurrentProcess().Id,updated_utc=DateTime.UtcNow.ToString("o"),mode="lan-gateway",enabled=enabled,ready=ready,capturing=capturing,gateway=gateway,local_ip=local,adapter=adapter,adapter_name=adapterName,gateway_mac=transport==null?"":transport.GatewayMac,front_port=front,guard_protected=guardReady,tun_ready=guardReady,dns64_65_blocked=guardReady,guard=guardStatus,ipv6_firewall_ready=(DateTime.UtcNow-firewallChecked).TotalSeconds<45,last_exit=lastExit,exit_location=lastLocation,exit_colo=lastColo,exit_verified_utc=lastCheck,gateway_operation=operation,rule_sync=rules==null?null:rules.Status(),message=message,native_error=nativeError,exit_protection="domain-list",real_target_started=false,identities=identity==null?new object[0]:identity.Status(),transport=transport==null?null:transport.Status(),domain_proxy=domainProxy==null?null:domainProxy.Status(),clash_proxy=clashProxy==null?null:clashProxy.Status(),udp=udp==null?null:udp.Status()};
+        return new {version=Version,service_pid=Process.GetCurrentProcess().Id,updated_utc=DateTime.UtcNow.ToString("o"),mode="lan-gateway",enabled=enabled,ready=ready,capturing=capturing,gateway=gateway,local_ip=local,adapter=adapter,adapter_name=adapterName,gateway_mac=transport==null?"":transport.GatewayMac,front_port=front,guard_protected=guardReady,tun_ready=guardReady,dns64_65_blocked=guardReady,guard=guardStatus,ipv6_firewall_ready=(DateTime.UtcNow-firewallChecked).TotalSeconds<45,last_exit=lastExit,exit_location=lastLocation,exit_colo=lastColo,exit_verified_utc=lastCheck,gateway_operation=operation,rule_sync=rules==null?null:rules.Status(),message=message,native_error=nativeError,process_ip_guard_live=networkGuard.Live,exit_protection="persistent-wfp",real_target_started=false,identities=identity==null?new object[0]:identity.Status(),transport=transport==null?null:transport.Status(),domain_proxy=domainProxy==null?null:domainProxy.Status(),clash_proxy=clashProxy==null?null:clashProxy.Status(),udp=udp==null?null:udp.Status()};
     }
     void Save() { Atomic(Path.Combine(Root,"status.json"),Snapshot()); }
-    void CloseProxies() { ready=false;if(udp!=null)udp.Pause();if(domainProxy!=null)domainProxy.Dispose();if(clashProxy!=null)clashProxy.Dispose();domainProxy=clashProxy=null; }
+    void CloseProxies() { networkGuard.Pause();ready=false;if(udp!=null)udp.Pause();if(domainProxy!=null)domainProxy.Dispose();if(clashProxy!=null)clashProxy.Dispose();domainProxy=clashProxy=null; }
     void OpenProxies() { if(domainProxy!=null)return;try{domainProxy=new GatewayProxy(transport,17893,front,connectionTiming);clashProxy=new GatewayProxy(transport,17891,front,connectionTiming);}catch{CloseProxies();throw;} }
     void CheckExit() { using(var route=transport.RetainActiveRoute())SetExit(ProbeRoute(route)); }
     void Pipe() {
@@ -99,27 +108,42 @@ public sealed partial class GatewayService : ServiceBase {
             var nic=NetworkInterface.GetAllNetworkInterfaces().Single(n=>n.Id.Equals(adapter,StringComparison.OrdinalIgnoreCase));
             local=GatewayLink.ResolveSource(adapter,gateway);adapterName=nic.Name;
             if(File.Exists(Path.Combine(Root,"intent.json")))enabled=Flag(ReadJson(Path.Combine(Root,"intent.json")),"enabled");
-            identity=new ProcessIdentity(Str(config,"desktop_image"),Str(config,"code_image"),ProcessIdentity.ProfileForOwner(ownerSid));guardReady=Guard();if(!guardReady)throw new IOException("Domain protection is not ready.");
-            transport=new GatewayTransport(adapter,local,gateway);rules=new RuleFeed(Root,transport,front);identity.RuleName=name=>rules.Active.MatchesProcess(name);transport.RuleForwarding=enabled&&guardReady;transport.Rules=()=>rules.Active;CheckExit();Firewall();
+            identity=new ProcessIdentity(Str(config,"desktop_image"),Str(config,"code_image"),ProcessIdentity.ProfileForOwner(ownerSid));
+            transport=new GatewayTransport(adapter,local,gateway);rules=new RuleFeed(Root,transport,front,networkGuard);identity.RuleName=name=>rules.Active.MatchesProcess(name);transport.RuleForwarding=false;transport.Rules=()=>rules.Active;
             selector=identity.Select;logger=p=>{string value=Marshal.PtrToStringAnsi(p);if(value!=null&&(value.IndexOf("failed",StringComparison.OrdinalIgnoreCase)>=0||value.IndexOf("error",StringComparison.OrdinalIgnoreCase)>=0))nativeError=value;};NativeBridge.SetLogCallback(logger);
-            if(!NativeBridge.SetRelayEndpoint(BitConverter.ToUInt32(IPAddress.Parse("172.31.254.1").GetAddressBytes(),0),(uint)Tun()))throw new IOException("Relay TUN setup failed.");
+            while(true){
+                if(stopping.WaitOne(0))return;
+                guardReady=Guard();
+                if(guardReady){try{if(BindRelay())break;}catch(NetworkInformationException){}}
+                message="等待保护网卡及策略核验，目标连接已阻断。";Save();
+                if(stopping.WaitOne(500))return;
+            }
+            CheckExit();Firewall();
             uint proxy=NativeBridge.AddProxy(1,"127.0.0.1",17893,null,null,false);if(proxy==0||!NativeBridge.SetOwnerSelector(selector,proxy,(ushort)front))throw new IOException("Signed process routing setup failed.");
             udp=new UdpForwarder(null,17893){SelectOwner=identity.Select,IsReady=()=>ready};
             connectionTiming=new ConnectionTimingLog(Root);
-            if(enabled)OpenProxies();
             if(!NativeBridge.Start())throw new IOException("Process forwarding could not start: "+nativeError);capturing=true;
             pipeWorker=Task.Run((Action)Pipe);DateTime nextLink=DateTime.MinValue,nextFirewall=DateTime.UtcNow.AddSeconds(15);
+            bool linkReady=false;
             while(!stopping.WaitOne(0)) {
                 if(!NativeBridge.Alive()||!transport.Ready)throw new IOException("Network worker stopped.");
                 guardReady=Guard();
-                if(DateTime.UtcNow>=nextLink){transport.RefreshLink();nextLink=DateTime.UtcNow.AddSeconds(10);NativeBridge.SetRelayEndpoint(BitConverter.ToUInt32(IPAddress.Parse("172.31.254.1").GetAddressBytes(),0),(uint)Tun());}
+                if(!guardReady){linkReady=false;nextLink=DateTime.MinValue;transport.RuleForwarding=false;CloseProxies();}
+                else if(DateTime.UtcNow>=nextLink){
+                    try{transport.RefreshLink();linkReady=BindRelay();}
+                    catch(Exception error){nativeError=error.GetBaseException().Message;linkReady=false;}
+                    nextLink=DateTime.UtcNow.AddSeconds(linkReady?10:2);
+                    if(!linkReady){transport.RuleForwarding=false;CloseProxies();}
+                }
                 if(DateTime.UtcNow>=nextFirewall){Firewall();nextFirewall=DateTime.UtcNow.AddSeconds(15);}
-                if(!enabled||!guardReady){CloseProxies();message=enabled?"等待域名保护恢复，目标流量暂停。":"专用连接已暂停，域名保护保留。";}
+                guardReady=guardReady&&Guard();
+                if(!enabled||!guardReady||!linkReady){CloseProxies();message=enabled?"等待域名保护与网关恢复，目标流量暂停。":"专用连接已暂停，域名保护保留。";}
                 else{OpenProxies();ready=true;message="命中域名、IPv4 网段、ASN 或程序名的连接经 "+gateway+"；其他程序保留原路径。";}
-                if(applyRequested)ApplyCandidate();
+                if(applyRequested&&guardReady&&linkReady)ApplyCandidate();
                 lock(sync){if(requestCheck&&!operationBusy){requestCheck=false;BeginValidation(gateway,true);}}
                 ExpireCandidate();
-                transport.RuleForwarding=ready;rules.Tick(ready);Save();stopping.WaitOne(500);
+                lock(sync){transport.RuleForwarding=ready&&enabled&&guardReady&&linkReady&&!stopping.WaitOne(0);networkGuard.SetLive(transport.RuleForwarding,rules.Active);}
+                rules.Tick(ready);Save();stopping.WaitOne(500);
             }
         }catch(Exception error){message=error.GetBaseException().Message;fatal=!stopping.WaitOne(0);}
         finally {

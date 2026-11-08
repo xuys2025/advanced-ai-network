@@ -36,7 +36,7 @@ public sealed partial class GatewayService {
             if(operationBusy)throw new IOException("正在验证或切换出口，请稍候。");
             if(command=="check"){requestCheck=true;return;}
             if(command!="enable"&&command!="disable")throw new IOException("不支持的网关操作。");
-            bool next=command=="enable";Atomic(Path.Combine(Root,"intent.json"),new{enabled=next});enabled=next;if(next)requestCheck=true;
+            bool next=command=="enable";if(!next)networkGuard.Pause();Atomic(Path.Combine(Root,"intent.json"),new{enabled=next});enabled=next;if(next)requestCheck=true;
         }
     }
     Dictionary<string,object> ProbeRoute(GatewayTransport.Route route){

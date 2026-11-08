@@ -15,6 +15,15 @@ public sealed class DomainGuard : IDisposable {
     readonly object sync=new object();readonly Dictionary<string,string> mapping=new Dictionary<string,string>();
     readonly Dictionary<string,string> tunMapping=new Dictionary<string,string>(),reverse=new Dictionary<string,string>();long answers,blocked64,blocked65;
     readonly List<TcpListener> listeners=new List<TcpListener>();readonly HashSet<TcpClient> clients=new HashSet<TcpClient>();
+    readonly HashSet<TcpClient> relays=new HashSet<TcpClient>();
+    DateTime forwardUntilUtc=DateTime.MinValue;
+    internal void SetForwardUntil(DateTime validUntilUtc) {
+        lock(sync){
+            forwardUntilUtc=validUntilUtc;
+            if(tunMode && DateTime.UtcNow>=validUntilUtc)
+                foreach(var relay in relays)relay.Close();
+        }
+    }
     UdpClient udp;volatile bool stopped;int inflight;
     public DomainGuard(string directory,int dns=53,int proxy=17891,int[] ports=null,bool selectiveTun=false,int gateway=GuardPolicy.GatewayPort){state=directory;dnsPort=dns;proxyPort=proxy;relayPorts=ports??new[]{80,443};tunMode=selectiveTun;gatewayPort=gateway;}
     public void Start() {
@@ -91,14 +100,17 @@ public sealed class DomainGuard : IDisposable {
     void Relay(TcpClient incoming,string domain,int port,bool gateway=false) {
         if(!Data.Target(domain))return;
         using(var outgoing=new TcpClient()) {
-            lock(sync)clients.Add(outgoing);
+            lock(sync){
+                if(stopped || (tunMode && DateTime.UtcNow>=forwardUntilUtc))return;
+                clients.Add(outgoing);relays.Add(outgoing);
+            }
             try{
                 var pending=outgoing.BeginConnect("127.0.0.1",proxyPort,null,null);if(!pending.AsyncWaitHandle.WaitOne(2000))return;outgoing.EndConnect(pending);
                 outgoing.ReceiveTimeout=5000;outgoing.SendTimeout=5000;var remote=outgoing.GetStream();byte[] connect=Encoding.ASCII.GetBytes("CONNECT "+domain+":"+port+" HTTP/1.1\r\nHost: "+domain+":"+port+"\r\n\r\n");remote.Write(connect,0,connect.Length);
                 var header=new List<byte>();while(header.Count<4096){int b=remote.ReadByte();if(b<0)return;header.Add((byte)b);int n=header.Count;if(n>=4&&header[n-4]==13&&header[n-3]==10&&header[n-2]==13&&header[n-1]==10)break;}
                 string status=Encoding.ASCII.GetString(header.ToArray()).Split('\n')[0];if(!status.StartsWith("HTTP/1.1 200 ")&&!status.StartsWith("HTTP/1.0 200 "))return;
                 outgoing.ReceiveTimeout=0;outgoing.SendTimeout=0;incoming.ReceiveTimeout=0;incoming.SendTimeout=0;var local=incoming.GetStream();if(gateway){byte[] ok=Encoding.ASCII.GetBytes("HTTP/1.1 200 Connection established\r\n\r\n");local.Write(ok,0,ok.Length);}Task a=local.CopyToAsync(remote),btask=remote.CopyToAsync(local);Task.WaitAny(a,btask);
-            }finally{lock(sync)clients.Remove(outgoing);}
+            }finally{lock(sync){clients.Remove(outgoing);relays.Remove(outgoing);}}
         }
     }
     public void Dispose(){stopped=true;if(udp!=null)udp.Close();lock(sync){foreach(var listener in listeners)listener.Stop();foreach(var client in clients)client.Close();listeners.Clear();}}

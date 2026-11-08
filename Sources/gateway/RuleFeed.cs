@@ -26,11 +26,14 @@ namespace AdvancedAINetwork.Gateway {
             finally{if(File.Exists(temp))File.Delete(temp);}
         }
         string FileAt(string name){return Path.Combine(root,name);}
-        internal RuleFeed(string root,GatewayTransport transport,int front){
+        readonly GatewayFailClosed networkGuard;
+        internal RuleFeed(string root,GatewayTransport transport,int front,GatewayFailClosed networkGuard){
+            this.networkGuard=networkGuard;
             this.root=root;this.transport=transport;this.front=front;
             string master=FileAt("managed-rules.json");
             if(!File.Exists(master))Write(master,Encoding.UTF8.GetString(Convert.FromBase64String("eyJyb290cyI6WyJhbnQuZGV2IiwiYW50aHJvcGljLmNvbSIsImFudGhyb3BpYy5jb20uY24iLCJhbnRocm9waWMudGVhbSIsImFudHNwYWNlLmRldiIsImNoYXRib3RjbGF1ZGUuY29tIiwiY2xhdS5kZSIsImNsYXVkZS5haSIsImNsYXVkZS5hcHAiLCJjbGF1ZGUuY29tIiwiY2xhdWRlLmRldiIsImNsYXVkZS5uZXciLCJjbGF1ZGUuc2l0ZSIsImNsYXVkZWFjYWRlbXkuY29tIiwiY2xhdWRlbWNwY2xpZW50LmNvbSIsImNsYXVkZW1jcGNvbnRlbnQuY29tIiwiY2xhdWRlcGFnZXMuZGV2IiwiY2xhdWRlc3R1ZGlvLmNvbSIsImNsYXVkZXVzZXJjb250ZW50LmNvbSIsImludGVyY29tLmlvIiwiaW50ZXJjb21jZG4uY29tIiwiaW50ZXJmYWNlLmZlZWRiYWNrIiwibGNpY2F0Lm9yZyIsImxjaWNvbGxlY3Rpb25zLm9yZyIsIm1jcHNlcnZlcnRlc3Qub25saW5lIiwibW9kZWxjb250ZXh0cHJvdG9jb2wuY29tIiwibW9kZWxjb250ZXh0cHJvdG9jb2wuaW8iLCJtb2RlbGNvbnRleHRwcm90b2NvbC5uZXQiLCJtb2RlbGNvbnRleHRwcm90b2NvbC5vcmciLCJtdXRob3MuY29tIiwic2VudHJ5LmlvIiwic2lsbHlsaXR0bGVndXkub3JnIiwic3RhdHNpZ2FwaS5uZXQiXSwiZXhhY3QiOlsiYW50aHJvcGljLWNvbS5naG9zdC5pbyIsImFudGhyb3BpYy5hdXRoMC5jb20iLCJhbnRocm9waWMuY29tLmNkbi5jbG91ZGZsYXJlLm5ldCIsImFwaS5pcGlmeS5vcmciLCJicm93c2VyLWludGFrZS11czUtZGF0YWRvZ2hxLmNvbSIsImNkbi5ncm93dGhib29rLmlvIiwiY2RuLnVzZWZhdGhvbS5jb20iLCJpY2FuaGF6aXAuY29tIiwiaWZjb25maWcubWUiLCJpcC5uZXQuY29mZmVlIiwic2VydmQtYW50aHJvcGljLXdlYnNpdGUuYi1jZG4ubmV0Iiwic3RvcmFnZS5nb29nbGVhcGlzLmNvbSJdLCJrZXl3b3JkcyI6WyJkYXRhZG9nIiwic2VudHJ5Iiwic2lmdCJdLCJwcm9jZXNzZXMiOlsiQ2xhdWRlIiwiQ2xhdWRlLmV4ZSIsImNsYXVkZSIsImNsYXVkZS5leGUiLCJjb3dvcmstc3ZjLmV4ZSJdLCJpcHY0IjpbIjE2MC43OS4xMDQuMC8yMSJdLCJhbm5vdW5jZWQiOlsiMTYwLjc5LjEwNC4wLzIzIl0sImFzbnMiOlszOTkzNThdLCJzaGEyNTYiOiIxNzhmZDc3NGU2NWUyMjNjNmE5YTJkMjgyMDk0YzViNzkyMmNiY2MyZjVlNjcwZmIyN2Y2MmRiOGFjOGM0NTYwIiwicmV2aXNpb24iOiIyY2UzNTA1MWQ5ZDA2ODk2OGQwMTU1ODA4MWRjMzg3NDFiMTkyZWFkNTQ3OGM3MmUzYTNiODAxNTRmZmI5NjU3In0=")));
             active=new JavaScriptSerializer().Deserialize<ManagedRules>(File.ReadAllText(master));active.Prepare();
+            networkGuard.SetPolicy(active);
             string dns=FileAt("managed-domains.json");if(!File.Exists(dns)||File.ReadAllText(dns)!=active.DnsSource())Write(dns,active.DnsSource());
             string prefs=FileAt("rule-auto.txt");automatic=!File.Exists(prefs)||File.ReadAllText(prefs).Trim()!="off";
             string history=FileAt("rule-history.json");
@@ -82,10 +85,16 @@ namespace AdvancedAINetwork.Gateway {
                     bool changed=candidate.revision!=active.revision;
                     if(changed){
                         var old=active;var json=new JavaScriptSerializer();
-                        Write(FileAt("managed-rules.previous.json"),json.Serialize(old));
-                        Write(FileAt("managed-domains.json"),candidate.DnsSource());
-                        try{Write(FileAt("managed-rules.json"),json.Serialize(candidate));}
-                        catch{Write(FileAt("managed-domains.json"),old.DnsSource());throw;}
+                        networkGuard.SetPolicy(candidate);
+                        try {
+                            Write(FileAt("managed-rules.previous.json"),json.Serialize(old));
+                            Write(FileAt("managed-domains.json"),candidate.DnsSource());
+                            Write(FileAt("managed-rules.json"),json.Serialize(candidate));
+                        } catch {
+                            networkGuard.SetPolicy(old);
+                            Write(FileAt("managed-domains.json"),old.DnsSource());
+                            throw;
+                        }
                         active=candidate;lastChange=DateTime.UtcNow.ToString("o");
                     }
                     lastSuccess=DateTime.UtcNow.ToString("o");next=DateTime.UtcNow.AddHours(Hours);message=changed?"新规则已载入":"已核对，当前为最新规则";

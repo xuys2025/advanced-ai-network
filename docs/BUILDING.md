@@ -11,7 +11,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1 -ManagedOnly
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Update-Payload.ps1
 ```
 
-`Build.ps1` 自动运行 DNS 解析、网关地址边界、内置 CLI 路径和签名识别、317 项域名守护检查，以及 IPv4 / ASN / 程序规则测试。`Update-Payload.ps1` 更新解压包内的可执行文件和界面。完成后保存工作、退出 高级 AI，再运行包根目录的 `Install.cmd`。
+`Build.ps1` 自动运行 DNS 解析、网关地址边界、内置 CLI 路径和签名识别、域名守护检查、IPv4 / ASN / 程序规则、慢维护和验证超时、中继撤销、通知防抖与文件锁恢复测试。`Update-Payload.ps1` 更新解压包内的可执行文件和界面。完成后保存工作、退出 高级 AI，再运行包根目录的 `Install.cmd`。
 
 只修改 HTML、CSS 或 JS 时，把 `Sources/client` 的对应文件复制到解压包的 `App/resources/app` 即可。正式应用更改时仍需通过安装流程。
 

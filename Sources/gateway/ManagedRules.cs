@@ -79,11 +79,14 @@ namespace AdvancedAINetwork.Gateway {
         public sealed class Prefix {public string prefix;public Period[] timelines;}
         public sealed class Period {public string endtime;}
         public static IEnumerable<string> ActiveV4(uint asn,string json){
+            return ActiveV4(asn,json,DateTime.UtcNow);
+        }
+        internal static IEnumerable<string> ActiveV4(uint asn,string json,DateTime now){
             var response=new JavaScriptSerializer().Deserialize<Ris>(json);var d=response.data;
             DateTime end;
             if(response.status!="ok"||d==null||d.resource!=asn.ToString(CultureInfo.InvariantCulture)||d.prefixes==null||
                 !DateTime.TryParse(d.query_endtime,CultureInfo.InvariantCulture,DateTimeStyles.AssumeUniversal|DateTimeStyles.AdjustToUniversal,out end)||
-                (DateTime.UtcNow-end).TotalDays>3||end>DateTime.UtcNow.AddHours(1))throw new InvalidDataException("Unusable ASN announcement response");
+                (now-end).TotalDays>3||end>now.AddHours(1))throw new InvalidDataException("Unusable ASN announcement response");
             foreach(var p in d.prefixes.Where(p=>p.timelines!=null&&p.timelines.Any(t=>t.endtime==d.query_endtime)&&!p.prefix.Contains(":"))){Network(p.prefix);yield return p.prefix;}
         }
         public string DnsSource(){return new JavaScriptSerializer().Serialize(new{version=3,rules=new[]{new{domain=exact,domain_suffix=roots,domain_keyword=keywords}}});}
