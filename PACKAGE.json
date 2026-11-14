@@ -1,5 +1,5 @@
 {
-  "version": "0.6.9-lan.4",
+  "version": "0.6.9-lan.5",
   "platform": "Windows x64",
   "mode": "lan-gateway",
   "contains_source": true,

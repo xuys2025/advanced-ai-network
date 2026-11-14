@@ -24,6 +24,50 @@ internal static class Sentinel {
             State=state;pid=currentPid;return true;
         }
     }
+    internal sealed class EgressAlerts {
+        // Short WAN interruptions are common when a cellular router renews its address.
+        const long OutageGraceMs=150000, AddressSettleMs=75000, MaxAddressWaitMs=180000;
+        long firstFailure=-1, firstChange=-1, lastChange=-1;
+        string warning="";
+        internal string ObservedIp {get;private set;}
+        internal string ReportedIp {get;private set;}
+        internal bool Rechecking {get{return firstFailure>=0 && warning=="";}}
+        internal bool FastProbe {get{return Rechecking || firstChange>=0;}}
+
+        internal EgressAlerts(string observed,string reported){
+            ObservedIp=observed??"";
+            ReportedIp=String.IsNullOrEmpty(reported)?ObservedIp:reported;
+        }
+        internal void ResetChecks(){
+            firstFailure=firstChange=lastChange=-1;
+            warning="";
+        }
+        internal bool Failure(string kind,bool transient,long now){
+            // Only consecutive network probe failures qualify for the WAN grace interval.
+            if(transient){
+                if(firstFailure<0)firstFailure=now;
+                if(now-firstFailure<OutageGraceMs || warning!="")return false;
+            }else firstFailure=-1;
+            if(warning==kind)return false;
+            warning=kind;
+            return true;
+        }
+        internal string Verified(string ip,long now){
+            bool warned=warning!="";
+            string previous=ObservedIp;
+            warning="";firstFailure=-1;ObservedIp=ip;
+            if(ReportedIp=="" || ip==ReportedIp){
+                ReportedIp=ip;
+                firstChange=lastChange=-1;
+                return warned?"egress-restored":null;
+            }
+            if(firstChange<0){firstChange=now;lastChange=now;}
+            if(ip!=previous)lastChange=now;
+            if(!warned && now-lastChange<AddressSettleMs && now-firstChange<MaxAddressWaitMs)return null;
+            ReportedIp=ip;firstChange=lastChange=-1;
+            return "public-ip-changed";
+        }
+    }
     internal static string ChangedIp(string oldIp,string newIp){
         return !string.IsNullOrEmpty(oldIp)&&oldIp!=newIp?"公网 IP 从 "+oldIp+" 变为 "+newIp+"。专用网关已连通。":null;
     }
@@ -61,7 +105,8 @@ internal static class Sentinel {
         readonly ToolStripMenuItem summary=new ToolStripMenuItem("正在读取网关状态");
         readonly Alerts alerts=new Alerts();
         readonly Stopwatch clock=Stopwatch.StartNew();
-        string previousIp="",probeIssue="",lastNotice="",lastRaw="";
+        readonly EgressAlerts egress;
+        string probeIssue="",lastNotice="",lastRaw="";
         int pendingPid,unconfirmedChecks;
         readonly int observerPid, sessionId;
         DateTime nextProbe=DateTime.MinValue,nextHeartbeat=DateTime.MinValue,lastProbe=DateTime.MinValue;
@@ -69,7 +114,12 @@ internal static class Sentinel {
         public Watch(){
             using(var me=Process.GetCurrentProcess()){observerPid=me.Id;sessionId=me.SessionId;}
             Directory.CreateDirectory(Protection.Data);
-            try{previousIp=Protection.Str(Protection.Read(latest),"ip");}catch(IOException){}catch(ArgumentException){}catch(InvalidOperationException){}
+            string observed="",reported="";
+            try{
+                var saved=Protection.Read(latest);
+                observed=Protection.Str(saved,"ip");reported=Protection.Str(saved,"reported_ip");
+            }catch(IOException){}catch(ArgumentException){}catch(InvalidOperationException){}
+            egress=new EgressAlerts(observed,reported);
             summary.Enabled=false;var menu=new ContextMenuStrip();menu.Items.Add(summary);menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("立即检查专用出口",null,(s,e)=>Launch("--check"));
             menu.Items.Add("紧急暂停高级 AI 联网",null,(s,e)=>Launch("--pause"));
@@ -96,6 +146,7 @@ internal static class Sentinel {
             if(v.state=="unknown" && raw!=lastRaw)Record("sample-recheck",v.message+" "+v.detail);
             lastRaw=raw;
             if(changed){
+                pendingPid=0;egress.ResetChecks();
                 if(!v.Ready){Notice(v.state,v.message+" "+v.detail,v.state=="paused"?ToolTipIcon.Info:ToolTipIcon.Warning);probeIssue="";lastProbe=DateTime.MinValue;unconfirmedChecks=0;}
                 else{
                     if(previousState!="")Notice("backend-restored","网关后台已就绪，正在核对实际出口。",ToolTipIcon.Info);
@@ -106,31 +157,42 @@ internal static class Sentinel {
             if(pending!=null && pending.IsCompleted){
                 try{
                     var sample=pending.GetAwaiter().GetResult();
-                    if(v.Ready && sample.servicePid==v.pid && sample.gateway==v.gateway){
-                        var change=ChangedIp(previousIp,sample.ip);
-                        if(change!=null)Notice("public-ip-changed",DateTime.Now.ToString("HH:mm:ss")+" "+change,ToolTipIcon.Info);
-                        else if(probeIssue!="")Notice("egress-restored","专用出口检查恢复，公网 IP 为 "+sample.ip+"。",ToolTipIcon.Info);
-                        if(previousIp=="" || change!=null)Protection.Save(latest,new{ip=sample.ip,country=sample.country,observed_utc=sample.measuredUtc.ToString("o")});
-                        previousIp=sample.ip;lastProbe=sample.measuredUtc;probeIssue="";unconfirmedChecks=0;
+                    if(v.Ready && pendingPid==v.pid && sample.servicePid==v.pid && sample.gateway==v.gateway){
+                        string observed=egress.ObservedIp,reported=egress.ReportedIp;
+                        string kind=egress.Verified(sample.ip,clock.ElapsedMilliseconds);
+                        if(observed!=sample.ip)Record("verified-ip","已核实专用出口 IP 为 "+sample.ip+"。");
+                        if(kind=="public-ip-changed")Notice(kind,ChangedIp(reported,sample.ip),ToolTipIcon.Info);
+                        else if(kind=="egress-restored")Notice(kind,"专用出口检查恢复，公网 IP 为 "+sample.ip+"。",ToolTipIcon.Info);
+                        if(observed!=sample.ip || reported!=egress.ReportedIp)
+                            Protection.Save(latest,new{ip=sample.ip,reported_ip=egress.ReportedIp,country=sample.country,observed_utc=sample.measuredUtc.ToString("o")});
+                        lastProbe=sample.measuredUtc;probeIssue="";unconfirmedChecks=0;
+                        nextProbe=now.AddSeconds(egress.FastProbe?12:60);
                     }
                 }catch(Protection.StatusUnconfirmed ex){
                     if(v.Ready && pendingPid==v.pid){
                         if(++unconfirmedChecks<=2){Record("check-retry",ex.Message);nextProbe=now.AddSeconds(2);}
-                        else{if(probeIssue=="")Notice("check-status-unconfirmed","状态多次无法核实，出口检查尚未完成。",ToolTipIcon.Warning);probeIssue=ex.Message;}
+                        else{if(egress.Failure("check-status-unconfirmed",false,clock.ElapsedMilliseconds))Notice("check-status-unconfirmed","状态多次无法核实，出口检查尚未完成。",ToolTipIcon.Warning);probeIssue=ex.Message;}
                     }
                 }catch(Exception ex){
-                    if(v.Ready && pendingPid==v.pid){if(probeIssue=="")Notice("egress-unverified","专用出口检查失败。请先检查出口再发送。",ToolTipIcon.Warning);probeIssue=ex.Message;Record("check-error",ex.Message);}
+                    if(v.Ready && pendingPid==v.pid){
+                        bool transient=ex is Protection.TransientProbeError;
+                        string kind=transient?"egress-unverified":"check-error-warning";
+                        if(egress.Failure(kind,transient,clock.ElapsedMilliseconds))
+                            Notice(kind,transient?"专用出口持续无法通过 HTTPS 检查，请检查网关。":"专用出口检查失败。"+ex.Message,ToolTipIcon.Warning);
+                        probeIssue=ex.Message;Record("check-error",ex.Message);unconfirmedChecks=0;
+                        nextProbe=now.AddSeconds(egress.FastProbe?12:60);
+                    }
                 }
                 pending=null;
             }
             if(v.Ready&&pending==null&&now>=nextProbe){
                 nextProbe=now.AddSeconds(60);pendingPid=v.pid;pending=Task.Run((Func<Protection.Egress>)Protection.Check);
             }
-            string visible=!v.Ready?v.message:probeIssue!=""?"专用出口检查失败":lastProbe==DateTime.MinValue?"正在核对专用出口":"专用出口正常 · "+previousIp;
+            string visible=!v.Ready?v.message:egress.Rechecking?"正在复查专用出口":probeIssue!=""?"专用出口检查失败":lastProbe==DateTime.MinValue?"正在核对专用出口":"专用出口正常 · "+egress.ObservedIp;
             summary.Text=visible;string tip=Title+" · "+visible;tray.Text=tip.Substring(0,Math.Min(63,tip.Length));
             tray.Icon=!v.Ready||probeIssue!=""?SystemIcons.Warning:SystemIcons.Information;
             if(changed||now>=nextHeartbeat){
-                try{Protection.Save(status,new{pid=observerPid,session=sessionId,state=v.state,service_pid=v.pid,gateway=v.gateway,ip=previousIp,last_check_utc=lastProbe==DateTime.MinValue?"":lastProbe.ToString("o"),probe_error=probeIssue,last_notice=lastNotice,updated_utc=now.ToString("o")});}
+                try{Protection.Save(status,new{pid=observerPid,session=sessionId,state=v.state,service_pid=v.pid,gateway=v.gateway,ip=egress.ObservedIp,last_check_utc=lastProbe==DateTime.MinValue?"":lastProbe.ToString("o"),probe_error=probeIssue,last_notice=lastNotice,updated_utc=now.ToString("o")});}
                 catch(IOException){}catch(UnauthorizedAccessException){}
                 nextHeartbeat=now.AddSeconds(5);
             }

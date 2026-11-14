@@ -5,9 +5,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $package=$PSScriptRoot;$name='AdvancedAINetworkLanGateway';$root=Join-Path $env:ProgramData $name
-$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.4'
+$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.5'
 $runKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$result=[ordered]@{success=$false;version='0.6.9-lan.4';check_only=[bool]$CheckOnly}
+$result=[ordered]@{success=$false;version='0.6.9-lan.5';check_only=[bool]$CheckOnly}
 $backup=$null;$stopped=$false;$created=$false;$oldRun=$null;$uiStopped=$false;$oldRoot=$null;$oldLauncher=$null
 function Save-Json($path,$data){[IO.File]::WriteAllText($path,($data|ConvertTo-Json -Depth 15),[Text.UTF8Encoding]::new($false))}
 function No-Link([string]$path){if((Test-Path -LiteralPath $path)-and((Get-Item -LiteralPath $path -Force).Attributes-band[IO.FileAttributes]::ReparsePoint)){throw ('目录不能是链接：'+$path)}}

@@ -4,7 +4,35 @@ using System.Threading;
 
 internal static class AlertRegression {
     static void Expect(bool value,string text){if(!value)throw new Exception(text);}
+    static void TestCellularRenewal(){
+        const string a="203.0.113.1", b="203.0.113.2", c="203.0.113.3";
+        var e=new Sentinel.EgressAlerts(a,null);
+        Expect(!e.Failure("wan",true,0) && e.FastProbe && e.Rechecking,"first WAN timeout produced a warning");
+        Expect(!e.Failure("wan",true,60000),"second timeout produced a warning");
+        Expect(e.Verified(b,118000)==null && e.ObservedIp==b && e.ReportedIp==a,"simulated renewal produced an early notification");
+        Expect(e.Verified(c,178000)==null && e.Verified(c,239000)==null,"intermediate IP reported");
+        Expect(e.Verified(c,254000)=="public-ip-changed" && e.ReportedIp==c && !e.FastProbe,"final verified address was not reported");
+        Expect(e.Verified(c,314000)==null,"duplicate address notification");
+        e.Failure("wan",true,320000);
+        Expect(e.Verified(c,339000)==null,"brief outage with the same IP produced a recovery popup");
+        Expect(e.Verified(b,350000)==null && e.Verified(c,410000)==null && !e.FastProbe,"return to original IP produced a popup");
+        Expect(!e.Failure("wan",true,420000) && !e.Failure("wan",true,569999),"WAN grace too short");
+        Expect(e.Failure("wan",true,570000) && !e.Failure("wan",true,630000),"persistent outage warning missed or repeated");
+        Expect(e.Verified(b,640000)=="public-ip-changed" && e.Verified(b,700000)==null,"changed-IP recovery was duplicated");
+        e.Failure("wan",true,720000);
+        Expect(e.Failure("integrity",false,720001),"invalid proxy ownership or TLS error was hidden");
+        Expect(e.Verified(b,720010)=="egress-restored","announced failure never reported recovery");
+        var resumed=new Sentinel.EgressAlerts(b,a);
+        Expect(resumed.Verified(b,0)==null && resumed.Verified(b,75000)=="public-ip-changed","restart lost pending change");
+        var fresh=new Sentinel.EgressAlerts("","");
+        Expect(fresh.Verified(a,0)==null && !fresh.FastProbe,"first observed IP produced a popup");
+        fresh.Verified(b,1000);fresh.Verified(c,61000);fresh.Verified(b,121000);
+        Expect(fresh.Verified(c,181000)=="public-ip-changed","churn suppressed changes indefinitely");
+        Expect(Protection.TransientCurlCode(28) && Protection.TransientCurlCode(22) && !Protection.TransientCurlCode(60),"wrong probe failure classification");
+        Console.WriteLine("PASS cellular renewal at 118 s, IP churn, unchanged-IP recovery, persistent outages, immediate integrity alerts and observer restart.");
+    }
     static int Main(){
+        TestCellularRenewal();
         var alerts=new Sentinel.Alerts();
         Expect(alerts.Transition("ready",11,0),"initial state missing");
         Expect(!alerts.Transition("unknown",11,100),"single failed read raised an alarm");

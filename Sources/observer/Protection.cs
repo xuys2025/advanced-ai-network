@@ -106,13 +106,30 @@ internal static class Protection {
             }finally{Marshal.FreeHGlobal(memory);}
         }return false;
     }
-    internal static string Run(string image,string args,int timeout,bool requireSuccess){
+    internal sealed class TransientProbeError : IOException {
+        internal TransientProbeError(string message):base(message){}
+    }
+    internal static bool TransientCurlCode(int code){
+        switch(code){
+            case 5: case 6: case 7: case 18: case 22: case 28: case 52: case 55: case 56:return true;
+            default:return false;
+        }
+    }
+    internal static string Run(string image,string args,int timeout,bool requireSuccess,bool egressProbe=false){
         using(var child=new Process()){
             child.StartInfo=new ProcessStartInfo(image,args){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
             child.Start();var output=child.StandardOutput.ReadToEndAsync();var error=child.StandardError.ReadToEndAsync();
-            if(!child.WaitForExit(timeout)){try{child.Kill();}catch(InvalidOperationException){}throw new IOException("操作超时。");}
+            if(!child.WaitForExit(timeout)){
+                try{child.Kill();}catch(InvalidOperationException){}
+                if(egressProbe)throw new TransientProbeError("HTTPS 出口检查超时。");
+                throw new IOException("操作超时。");
+            }
             string text=output.GetAwaiter().GetResult().Trim();string detail=error.GetAwaiter().GetResult().Trim();
-            if(requireSuccess&&child.ExitCode!=0)throw new IOException(detail.Length>0?detail.Substring(0,Math.Min(detail.Length,200)):"出口检查未完成。");
+            if(requireSuccess&&child.ExitCode!=0){
+                string message=detail.Length>0?detail.Substring(0,Math.Min(detail.Length,200)):"出口检查未完成。";
+                if(egressProbe&&TransientCurlCode(child.ExitCode))throw new TransientProbeError(message);
+                throw new IOException(message);
+            }
             return text;
         }
     }
@@ -120,7 +137,7 @@ internal static class Protection {
         var before=Inspect();if(!before.Ready)throw new StatusUnconfirmed(before);
         if(!OwnsProxy(before.pid))throw new IOException("专用入口与网关服务进程不匹配。");
         string curl=Path.Combine(Environment.SystemDirectory,"curl.exe");
-        string trace=Run(curl,"-q --silent --show-error --fail --ipv4 --proto =https --connect-timeout 4 --max-time 8 --max-filesize 4096 --noproxy invalid.example --proxy http://127.0.0.1:17891 https://one.one.one.one/cdn-cgi/trace",10000,true);
+        string trace=Run(curl,"-q --silent --show-error --fail --ipv4 --proto =https --connect-timeout 4 --max-time 8 --max-filesize 4096 --noproxy invalid.example --proxy http://127.0.0.1:17891 https://one.one.one.one/cdn-cgi/trace",10000,true,true);
         string ip="",country="";
         foreach(string raw in trace.Split('\n')){string line=raw.Trim();if(line.StartsWith("ip="))ip=line.Substring(3);if(line.StartsWith("loc="))country=line.Substring(4);}
         IPAddress parsed;if(!IPAddress.TryParse(ip,out parsed)||parsed.AddressFamily!=AddressFamily.InterNetwork||parsed.ToString()!=ip)throw new IOException("出口检测站未返回有效 IPv4。");
