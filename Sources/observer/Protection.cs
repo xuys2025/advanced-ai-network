@@ -45,34 +45,41 @@ internal static class Protection {
             if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);}
         finally{if(File.Exists(tmp))File.Delete(tmp);}
     }
-    [DllImport("advapi32",SetLastError=true)] static extern bool QueryServiceStatusEx(IntPtr handle,int info,IntPtr buffer,int size,out int required);
-    [DllImport("advapi32",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr OpenSCManager(string machine,string database,uint access);
-    [DllImport("advapi32",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr OpenService(IntPtr manager,string name,uint access);
-    [DllImport("advapi32")] static extern bool CloseServiceHandle(IntPtr handle);
-    internal static int RunningPid(string name){
-        IntPtr manager=OpenSCManager(null,null,1),service=IntPtr.Zero,buffer=IntPtr.Zero;
-        try{
-            if(manager==IntPtr.Zero||(service=OpenService(manager,name,4))==IntPtr.Zero)throw new IOException("无法查询保护服务。");
-            buffer=Marshal.AllocHGlobal(36);int needed;
-            if(!QueryServiceStatusEx(service,0,buffer,36,out needed))throw new IOException("无法读取服务状态。");
-            return Marshal.ReadInt32(buffer,4)==4?Marshal.ReadInt32(buffer,28):0;
-        }finally{if(buffer!=IntPtr.Zero)Marshal.FreeHGlobal(buffer);if(service!=IntPtr.Zero)CloseServiceHandle(service);if(manager!=IntPtr.Zero)CloseServiceHandle(manager);}
-    }
+    internal static int RunningPid(string name){return GuardHeartbeat.RunningPid(name);}
     internal static View Inspect(){
         var v=new View{state="unknown",message="正在复核保护状态"};
         string source="网关服务";
         try{
             v.pid=RunningPid(Service);
             if(v.pid==0){v.state="down";v.message="转发后台已停止。请暂停发送，检查网关服务。";return v;}
-            source="网关心跳";var s=StatusSnapshotFile.Read(()=>Read(Path.Combine(Root,"status.json")));v.gateway=Str(s,"gateway");int.TryParse(Str(s,"front_port"),out v.front);
-            if(Str(s,"service_pid")!=v.pid.ToString() || !Fresh(s,5)){v.state="stale";v.message="转发后台心跳已过期。";return v;}
+            source="网关心跳";
+            Func<Dictionary<string,object>> readGateway=()=>StatusSnapshotFile.Read(()=>Read(Path.Combine(Root,"status.json")));
+            var s=readGateway();
+            if(Str(s,"service_pid")==v.pid.ToString() && Flag(s,"ready") && !Fresh(s,5)){
+                s=readGateway();
+                v.pid=RunningPid(Service);
+                if(v.pid==0){v.state="down";v.message="转发后台已停止。";return v;}
+            }
+            v.gateway=Str(s,"gateway");int.TryParse(Str(s,"front_port"),out v.front);
+            if(Str(s,"service_pid")!=v.pid.ToString() || !Fresh(s,5)){
+                v.state="stale";v.message="转发后台心跳已过期。";
+                DateTimeOffset stamp;
+                string age=DateTimeOffset.TryParse(Str(s,"updated_utc"),CultureInfo.InvariantCulture,DateTimeStyles.AssumeUniversal,out stamp)
+                    ?((long)(DateTimeOffset.UtcNow-stamp).TotalMilliseconds).ToString(CultureInfo.InvariantCulture):"unknown";
+                v.detail="service_pid="+v.pid+" snapshot_pid="+Str(s,"service_pid")+" heartbeat_age_ms="+age+" "+GatewayProgress.Describe(Root,v.pid);
+                return v;
+            }
             if(Str(s,"exit_protection")!="persistent-wfp"){v.state="policy";v.message="当前后台未报告持久阻断功能。";return v;}
             if(!Flag(s,"enabled") && !Flag(s,"process_ip_guard_live")){v.state="paused";v.message="专用联网已暂停。";return v;}
             if(String.IsNullOrEmpty(v.gateway)||v.gateway!=Str(Read(Path.Combine(Root,"config.json")),"gateway")){v.state="gateway";v.message="当前配置的网关是 "+v.gateway+"，请核对出口。";return v;}
             source="域名守护服务";
-            if(RunningPid("AdvancedAINetworkDomainGuard")==0){v.state="guard";v.message="域名保护服务已停止。";return v;}
-            source="域名守护心跳";var g=StatusSnapshotFile.Read(()=>Read(Path.Combine(GuardRoot,"guard-status.json")));
-            if(!Fresh(g,15)||!Flag(g,"tun_ready")||!Flag(g,"network_safety_ready")||!Flag(g,"dns_64_65_blocked")){
+            int guardPid=RunningPid("AdvancedAINetworkDomainGuard");
+            if(guardPid==0){v.state="guard";v.message="域名保护服务已停止。";return v;}
+            source="域名守护心跳";Dictionary<string,object> g;
+            using(var proof=GuardHeartbeat.Open(GuardRoot,false))
+                g=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(proof.Read(guardPid));
+            DateTimeOffset expiry;
+            if(!DateTimeOffset.TryParse(Str(g,"safety_valid_until_utc"),out expiry)||expiry<=DateTimeOffset.UtcNow||!Fresh(g,15)||!Flag(g,"tun_ready")||!Flag(g,"network_safety_ready")||!Flag(g,"dns_64_65_blocked")){
                 v.state="guard";v.message="独立域名保护尚未就绪。";return v;}
             if(!Flag(s,"ready")||!Flag(s,"capturing")||!Flag(s,"process_ip_guard_live")||!Flag(s,"guard_protected")){
                 bool readGap=false;object nested;

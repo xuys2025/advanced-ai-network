@@ -147,7 +147,11 @@ internal static class Sentinel {
             lastRaw=raw;
             if(changed){
                 pendingPid=0;egress.ResetChecks();
-                if(!v.Ready){Notice(v.state,v.message+" "+v.detail,v.state=="paused"?ToolTipIcon.Info:ToolTipIcon.Warning);probeIssue="";lastProbe=DateTime.MinValue;unconfirmedChecks=0;}
+                if(!v.Ready){
+                    if(v.state=="stale")Record("heartbeat-detail",v.detail);
+                    Notice(v.state,v.state=="stale"?v.message:v.message+" "+v.detail,v.state=="paused"?ToolTipIcon.Info:ToolTipIcon.Warning);
+                    probeIssue="";lastProbe=DateTime.MinValue;unconfirmedChecks=0;
+                }
                 else{
                     if(previousState!="")Notice("backend-restored","网关后台已就绪，正在核对实际出口。",ToolTipIcon.Info);
                     else Record("observer-started","开始监测网关与保护状态。");

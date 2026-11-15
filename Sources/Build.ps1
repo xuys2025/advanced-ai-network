@@ -18,6 +18,8 @@ if(!$ManagedOnly){
 $refs=@('/r:System.Web.Extensions.dll','/r:System.ServiceProcess.dll','/r:Microsoft.CSharp.dll')
 $gateway=@(Get-ChildItem (Join-Path $PSScriptRoot 'gateway') -Filter *.cs|Select-Object -ExpandProperty FullName)
 $gateway+=@(Get-ChildItem (Join-Path $PSScriptRoot 'native') -Filter *.cs|Select-Object -ExpandProperty FullName)
+$guardProof=Join-Path $PSScriptRoot 'guard\GuardHeartbeat.cs'
+$gateway+= $guardProof
 $gateway+= $compatibility
 foreach($main in @('GatewayService','IdentityProbe','SetupInspect','DnsTests','GatewayValidationTests','IdentityPathTests','ProtectionAudit','RouteProbe','ManagedRulesTests','GuardPolicyTool')){
     & $csc /nologo /utf8output /optimize+ /debug- /platform:x64 /target:exe @refs ('/main:'+$main) ('/out:'+(Join-Path $out ($main+'.exe'))) @gateway
@@ -38,7 +40,8 @@ foreach($main in @('AdvancedAINetwork.GuardService','GuardAnswerTests','Regressi
 & $csc /nologo /utf8output /optimize+ /debug- /platform:x64 /target:winexe /r:System.Web.Extensions.dll /r:System.Security.dll /main:AdvancedAINetwork.DesktopLauncher ('/out:'+(Join-Path $out 'AdvancedAINetworkLauncher.exe')) (Join-Path $PSScriptRoot 'launcher\Lifecycle.cs') (Join-Path $PSScriptRoot 'guard\Data.cs') (Join-Path $PSScriptRoot 'guard\LogText.cs') $compatibility
 if($LASTEXITCODE -ne 0){throw 'Launcher compilation failed.'}
 foreach($name in @('WinDivert.dll','WinDivert64.sys')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('third_party\WinDivertSDK\x64\'+$name)) -Destination $out -Force}
-$observer=@((Join-Path $PSScriptRoot 'observer\Protection.cs'),(Join-Path $PSScriptRoot 'observer\Sentinel.cs'),$snapshot,$compatibility)
+$progressSource=Join-Path $PSScriptRoot 'gateway\GatewayProgress.cs'
+$observer=@((Join-Path $PSScriptRoot 'observer\Protection.cs'),(Join-Path $PSScriptRoot 'observer\Sentinel.cs'),$snapshot,$progressSource,$guardProof,$compatibility)
 foreach($main in 'Sentinel','AlertRegression'){
     $name=if($main -eq 'Sentinel'){'ProtectionObserver'}else{$main}
     $targetType=if($main -eq 'Sentinel'){'winexe'}else{'exe'}
@@ -47,6 +50,16 @@ foreach($main in 'Sentinel','AlertRegression'){
 }
 & $csc /nologo /optimize+ /platform:x64 /r:System.Web.Extensions.dll ('/out:'+(Join-Path $out 'NetworkProbe.exe')) (Join-Path $PSScriptRoot 'tests\NetworkProbe.cs')
 if($LASTEXITCODE){throw 'Network probe compilation failed.'}
+& $csc /nologo /optimize+ /platform:x64 @refs ('/out:'+(Join-Path $out 'GatewayMaintenanceTests.exe')) (Join-Path $PSScriptRoot 'tests\GatewayMaintenanceTests.cs') (Join-Path $PSScriptRoot 'gateway\GatewayFirewallRule.cs') $progressSource
+if($LASTEXITCODE){throw 'Gateway maintenance test compilation failed.'}
+& (Join-Path $out 'GatewayMaintenanceTests.exe')
+if($LASTEXITCODE){throw 'Gateway maintenance tests failed.'}
+& (Join-Path $PSScriptRoot 'tests\TunFirewallTests.ps1')
+& (Join-Path $PSScriptRoot 'tests\EffectiveDnsTests.ps1')
+& $csc /nologo /optimize+ /platform:x64 ('/out:'+(Join-Path $out 'GuardHeartbeatTests.exe')) $guardProof (Join-Path $PSScriptRoot 'tests\GuardHeartbeatTests.cs')
+if($LASTEXITCODE){throw 'Guard heartbeat test compilation failed.'}
+& (Join-Path $out 'GuardHeartbeatTests.exe')
+if($LASTEXITCODE){throw 'Guard heartbeat tests failed.'}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tests\SlowFixture.ps1') -Destination $out -Force
 foreach($test in @('DnsTests','GatewayValidationTests','IdentityPathTests','GuardAnswerTests','Regression','RelayRegression','AlertRegression')){& (Join-Path $out ($test+'.exe'));if($LASTEXITCODE -ne 0){throw ($test+' failed.')}}
 $testOutput=Join-Path $out 'rule-test'

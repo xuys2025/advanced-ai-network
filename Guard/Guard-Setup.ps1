@@ -64,6 +64,18 @@ function AssertTunRangeAvailable {
     $firewall=Get-NetFirewallRule -Name $tunFirewall -ErrorAction SilentlyContinue
     if($null -ne $firewall -and (!$owned -or $firewall.Group -ne $tunGroup)){throw 'The dedicated TUN firewall name belongs to another configuration.'}
 }
+function TunFirewallChanges($rule,[string[]]$addresses,[string[]]$currentAliases,[string[]]$aliases){
+    $changes=@{}
+    if([string]$rule.Direction -ne 'Outbound'){$changes.Direction='Outbound'}
+    if([string]$rule.Action -ne 'Block'){$changes.Action='Block'}
+    if([string]$rule.Profile -ne 'Any'){$changes.Profile='Any'}
+    if([string]$rule.Enabled -ne 'True'){$changes.Enabled='True'}
+    $formats=@($tunPrefix,'198.19.64.0/255.255.192.0','198.19.64.0-198.19.127.255')
+    if($addresses.Count -ne 1 -or $addresses[0] -notin $formats){$changes.RemoteAddress=$tunPrefix}
+    $expected=[Collections.Generic.HashSet[string]]::new($aliases,[StringComparer]::OrdinalIgnoreCase)
+    if(!$expected.SetEquals($currentAliases)){$changes.InterfaceAlias=$aliases}
+    return $changes
+}
 function RepairTunSafety {
     if(!(Test-Path -LiteralPath $tunMarker)){throw 'Selective TUN has not been installed; use Enable to upgrade protection.'}
     AssertTunRangeAvailable
@@ -75,8 +87,15 @@ function RepairTunSafety {
     if(@(TunFallback 'ActiveStore').Count -eq 0){$null=New-NetRoute -DestinationPrefix $tunPrefix -InterfaceIndex (TunLoopIndex) -NextHop '0.0.0.0' -RouteMetric 4096 -PolicyStore ActiveStore}
     $aliases=@(Get-NetIPInterface -AddressFamily IPv4 | Where-Object {$_.InterfaceIndex -ne (TunLoopIndex) -and $_.InterfaceAlias -ne $tunAdapter} | Select-Object -ExpandProperty InterfaceAlias -Unique)
     if($aliases.Count -eq 0){throw 'Waiting for uplink interfaces; the protected loopback route is retained.'}
-    if($null -eq (Get-NetFirewallRule -Name $tunFirewall -ErrorAction SilentlyContinue)){$null=New-NetFirewallRule -Name $tunFirewall -DisplayName '高级 AI 专用网络 protected address range' -Group $tunGroup -Direction Outbound -Action Block -Profile Any -RemoteAddress $tunPrefix -InterfaceAlias $aliases}
-    else{$null=Set-NetFirewallRule -Name $tunFirewall -Direction Outbound -Action Block -Profile Any -RemoteAddress $tunPrefix -InterfaceAlias $aliases -Enabled True}
+    $rule=Get-NetFirewallRule -Name $tunFirewall -ErrorAction SilentlyContinue
+    if($null -eq $rule){$null=New-NetFirewallRule -Name $tunFirewall -DisplayName '高级 AI 专用网络 protected address range' -Group $tunGroup -Direction Outbound -Action Block -Profile Any -RemoteAddress $tunPrefix -InterfaceAlias $aliases}
+    else{
+        if($rule.Group -ne $tunGroup){throw 'The dedicated TUN firewall rule belongs to another configuration.'}
+        $addresses=@(($rule | Get-NetFirewallAddressFilter -ErrorAction Stop).RemoteAddress)
+        $currentAliases=@(($rule | Get-NetFirewallInterfaceFilter -ErrorAction Stop).InterfaceAlias)
+        $changes=TunFirewallChanges $rule $addresses $currentAliases $aliases
+        if($changes.Count){$null=Set-NetFirewallRule -Name $tunFirewall @changes -ErrorAction Stop}
+    }
 }
 function RemoveTunSafety {
     if(!(Test-Path -LiteralPath $tunMarker)){return}
@@ -85,24 +104,35 @@ function RemoveTunSafety {
     foreach($store in @('PersistentStore','ActiveStore')){foreach($route in @(TunFallback $store)){$route | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue}}
     Remove-Item -LiteralPath $tunMarker -Force
 }
-function AssertNoConflicts {
+function AssertNoConflicts($allRules) {
     $claimed=@($namespaces)
     if($keywordMode){$claimed+='.'}
-    $conflicts=@(Get-DnsClientNrptRule | Where-Object {$_.Comment -ne $comment -and @($_.Namespace | Where-Object {$claimed -contains $_}).Count -gt 0})
+    $conflicts=@($allRules | Where-Object {$_.Comment -ne $comment -and @($_.Namespace | Where-Object {$claimed -contains $_}).Count -gt 0})
     if($conflicts.Count -gt 0){throw '存在其他软件或管理员设置的同名 DNS 策略。请先停用旧 高级 AI 专用客户端并检查冲突，本程序不会删除它们。'}
+}
+function Get-EffectiveCoverage {
+    $keywordSystem=Test-Path -LiteralPath $keywordMarker
+    $expected=@{}
+    foreach($name in $namespaces){$expected[$name]=$dispatchDns}
+    if($keywordSystem){$expected['.']='127.0.0.3'}
+    $matches=@{}
+    foreach($rule in @(Get-DnsClientNrptPolicy -Effective -ErrorAction Stop)){
+        $servers=@($rule.NameServers)
+        foreach($name in $rule.Namespace){
+            if($null -eq $name -or !$expected.ContainsKey($name)){continue}
+            $valid=($servers.Count -eq 1 -and $servers[0] -eq $expected[$name])
+            if(!$matches.ContainsKey($name) -or !$valid){$matches[$name]=$valid}
+        }
+    }
+    $covered=0
+    foreach($valid in $matches.Values){if($valid){$covered++}}
+    [pscustomobject]@{covered=$covered;required=$expected.Count;keyword_system_enabled=$keywordSystem}
 }
 function Status {
     $rules=@(OwnedRules)
-    $effective=@(Get-DnsClientNrptPolicy -Effective -ErrorAction Stop)
+    $coverage=Get-EffectiveCoverage
+    $covered=$coverage.covered;$required=$coverage.required;$keywordSystem=$coverage.keyword_system_enabled
     $service=Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-    $covered=0
-    foreach($name in $namespaces){
-        $match=@($effective | Where-Object {($_.Namespace -contains $name) -and ($_.NameServers -contains $dispatchDns)})
-        if($match.Count -gt 0){$covered++}
-    }
-    $required=$namespaces.Count
-    $keywordSystem=Test-Path -LiteralPath $keywordMarker
-    if($keywordSystem){$required++;if(@($effective|Where-Object {$_.Namespace -contains '.' -and $_.NameServers -contains '127.0.0.3'}).Count){$covered++}}
     # PersistentStore and firewall queries require elevation. The SYSTEM service
     # publishes a short-lived result only after its privileged repair succeeds.
     $safety=$false
@@ -135,23 +165,31 @@ if($Action -eq 'Disable'){
     exit 0
 }
 # Never replace existing namespace policy installed by another VPN or administrator.
-if($Action -ne 'Repair'){AssertNoConflicts}
+if($Action -ne 'Repair'){AssertNoConflicts @(Get-DnsClientNrptRule -ErrorAction Stop)}
 function RepairRules {
     $lockPath=Join-Path $guardPath 'policy.lock'
     $policyLock=$null
     for($attempt=0;$attempt -lt 30 -and $null -eq $policyLock;$attempt++){try{$policyLock=[IO.File]::Open($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}catch [IO.IOException]{Start-Sleep -Milliseconds 100}}
     if($null -eq $policyLock){throw '域名策略正在维护，稍后重试。'}
     try{
-        AssertNoConflicts
-        $existingOwned=@(OwnedRules)
+        $allRules=@(Get-DnsClientNrptRule -ErrorAction Stop)
+        AssertNoConflicts $allRules
+        $byName=@{}
+        foreach($rule in $allRules){
+            if($rule.Comment -ne $comment){continue}
+            foreach($name in $rule.Namespace){
+                if(!$byName.ContainsKey($name)){$byName[$name]=[Collections.ArrayList]::new()}
+                $null=$byName[$name].Add($rule)
+            }
+        }
         if(Test-Path -LiteralPath $keywordMarker){
-            $any=@($existingOwned|Where-Object {$_.Namespace -contains '.'})
-            if(!$any.Count){$null=Add-DnsClientNrptRule -Namespace '.' -NameServers '127.0.0.3' -Comment $comment -DisplayName '高级 AI 专用网络 keyword DNS'}
+            $any=$byName['.']
+            if(!$byName.ContainsKey('.')){$null=Add-DnsClientNrptRule -Namespace '.' -NameServers '127.0.0.3' -Comment $comment -DisplayName '高级 AI 专用网络 keyword DNS'}
             else{foreach($r in $any){if(@($r.NameServers).Count -ne 1 -or $r.NameServers -notcontains '127.0.0.3'){Set-DnsClientNrptRule -Name $r.Name -NameServers '127.0.0.3'}}}
         }
         foreach($name in $namespaces){
-            $matching=@($existingOwned | Where-Object {$_.Namespace -contains $name})
-            if($matching.Count -eq 0){$null=Add-DnsClientNrptRule -Namespace $name -NameServers $dispatchDns -Comment $comment -DisplayName ('高级 AI 专用网络 '+$name)}
+            $matching=$byName[$name]
+            if(!$byName.ContainsKey($name)){$null=Add-DnsClientNrptRule -Namespace $name -NameServers $dispatchDns -Comment $comment -DisplayName ('高级 AI 专用网络 '+$name)}
             else{foreach($rule in $matching){$servers=@($rule.NameServers);if($servers.Count -ne 1 -or $servers[0] -ne $dispatchDns){Set-DnsClientNrptRule -Name $rule.Name -NameServers $dispatchDns}}}
         }
     }finally{$policyLock.Dispose()}
@@ -163,10 +201,9 @@ if($Action -eq 'Repair'){
     [Console]::Error.WriteLine('guard-stage protected routes and firewall')
     RepairTunSafety
     [Console]::Error.WriteLine('guard-stage effective DNS verification')
-    $result=Status
-    $coverage=$result|ConvertFrom-Json
+    $coverage=Get-EffectiveCoverage
     if($coverage.required -lt 1 -or $coverage.covered -ne $coverage.required){throw 'Effective protected DNS rules are incomplete.'}
-    $result
+    $coverage | ConvertTo-Json -Compress
     exit 0
 }
 $sourceExe=Join-Path $PSScriptRoot 'AdvancedAINetworkGuard.exe'

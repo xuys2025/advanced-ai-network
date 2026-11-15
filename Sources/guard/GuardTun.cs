@@ -55,6 +55,8 @@ internal sealed class TunLiveness {
 public sealed class GuardTun : IDisposable {
     readonly string folder;readonly DomainGuard guard;readonly object sync=new object(),logSync=new object();
     readonly GuardMaintenance maintenance;
+    GuardHeartbeat heartbeat;
+    readonly int servicePid=Process.GetCurrentProcess().Id;
     readonly TunLiveness liveness=new TunLiveness();
     Process process;IntPtr job;CancellationTokenSource cancellation;Task worker;bool ready;int failures;string lastError="",lastCoreError="";
     public GuardTun(string directory,DomainGuard dns){
@@ -64,7 +66,13 @@ public sealed class GuardTun : IDisposable {
             return DateTime.UtcNow;
         },token),Log);
     }
-    public void Start(){cancellation=new CancellationTokenSource();worker=Task.Run(()=>Run(cancellation.Token));}
+    public void Start(){
+        cancellation=new CancellationTokenSource();
+        worker=Task.Run(()=>{
+            try{Run(cancellation.Token);}
+            finally{if(heartbeat!=null)heartbeat.Dispose();}
+        });
+    }
     public static int RouteInterface(string destination){uint index;int error=GetBestInterface(BitConverter.ToUInt32(IPAddress.Parse(destination).GetAddressBytes(),0),out index);if(error!=0)throw new Exception("Unable to inspect protected route: "+error);return (int)index;}
     static int TunIndex(){var adapter=NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(x=>x.Name==GuardPolicy.InterfaceName);return adapter==null?0:adapter.GetIPProperties().GetIPv4Properties().Index;}
     bool Running {get{lock(sync){return process!=null&&!process.HasExited;}}}
@@ -73,6 +81,14 @@ public sealed class GuardTun : IDisposable {
     void Publish(){
         DateTime now=DateTime.UtcNow;
         bool safe=!cancellation.IsCancellationRequested&&maintenance.Safe(now);
+        try{
+            if(heartbeat==null)heartbeat=GuardHeartbeat.Open(folder,true);
+            string error=maintenance.Error??"";
+            var proof=Data.Obj("maintenance_revision",2,"updated_utc",now.ToString("o"),"tun_ready",ready,
+                "network_safety_ready",safe,"dns_64_65_blocked",true,"safety_valid_until_utc",maintenance.ValidUntil.ToString("o"),
+                "maintenance_error",error.Length<=320?error:error.Substring(0,320));
+            heartbeat.Publish(servicePid,Data.Json(proof));
+        }catch(Exception error){safe=false;Log("Guard heartbeat write failed: "+error.Message);}
         guard.SetForwardUntil(ready&&safe?maintenance.ValidUntil:DateTime.MinValue);
         try{
             var status=Data.Obj("version",GuardPolicy.Version,"maintenance_revision",2,"policy_hash",Data.PolicyHash,
@@ -82,8 +98,7 @@ public sealed class GuardTun : IDisposable {
                 "maintenance_busy",maintenance.Busy,"maintenance_failures",maintenance.Failures,"maintenance_error",maintenance.Error,
                 "tun_prefix",GuardPolicy.Prefix,"tun_interface",GuardPolicy.InterfaceName,"core_pid",Running?process.Id:0,
                 "restart_failures",failures,"last_error",lastError,"dns_64_65_blocked",true,"dns",guard.Statistics());
-            string path=Path.Combine(folder,"guard-status.json"),temp=path+".tmp";
-            File.WriteAllText(temp,Data.Json(status),new UTF8Encoding(false));if(File.Exists(path))File.Replace(temp,path,null);else File.Move(temp,path);
+            GuardHeartbeat.WriteStatus(Path.Combine(folder,"guard-status.json"),Data.Json(status));
         }catch(Exception ex){Log("Status write failed: "+ex.Message);}
     }
     void Run(CancellationToken token){
