@@ -12,6 +12,9 @@ using System.Web.Script.Serialization;
 
 namespace AdvancedAINetwork.Gateway {
     public sealed class ManagedRules {
+        internal const string ChallengeDomain="challenges.cloudflare.com";
+        internal const string DownloadDomain="downloads."+AiCompatibility.S_743e483ae01f1f;
+        internal static bool IsDownload(string host){return string.Equals(host.TrimEnd('.'),DownloadDomain,StringComparison.OrdinalIgnoreCase);}
         public const string Url=AiCompatibility.S_4e761e3e983fc0;
         public string[] roots,exact,keywords,processes,ipv4,announced;
         public uint[] asns;
@@ -40,6 +43,7 @@ namespace AdvancedAINetwork.Gateway {
         }
         public static string Digest(string s){using(var hash=SHA256.Create())return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(s))).Replace("-","").ToLowerInvariant();}
         public void Prepare(){
+            exact=Sorted(exact.Where(x=>!IsDownload(x)).Concat(new[]{ChallengeDomain}));
             ranges=ipv4.Concat(announced).Distinct().Select(Network).ToArray();
             processSet=new HashSet<string>(processes.Select(Proc),StringComparer.OrdinalIgnoreCase);
             revision=Digest(sha256+"\n"+string.Join("\n",announced));
@@ -63,7 +67,7 @@ namespace AdvancedAINetwork.Gateway {
                     if(!Regex.IsMatch(v,@"\A[a-zA-Z0-9][a-zA-Z0-9.-]{2,62}\z"))throw new InvalidDataException("Invalid keyword");words.Add(v.ToLowerInvariant());
                 }else if(type=="PROCESS-NAME"){
                     if(!Regex.IsMatch(v,@"\A[A-Za-z0-9][A-Za-z0-9_. -]{0,79}\z"))throw new InvalidDataException("Invalid program name");
-                    if(new[]{"system","svchost","gatewayservice","advancedainetworkguard","verge-mihomo","sing-box"}.Contains(Proc(v),StringComparer.OrdinalIgnoreCase))throw new InvalidDataException("Infrastructure process is not a valid target");
+                    if(new[]{"system","svchost","gatewayservice","advancedainetworkguard","verge-mihomo","sing-box","tailscaleexit"}.Contains(Proc(v),StringComparer.OrdinalIgnoreCase))throw new InvalidDataException("Infrastructure process is not a valid target");
                     names.Add(v);
                 }else if(type=="IP-CIDR"){Network(v);nets.Add(v);}
                 else if(type=="IP-ASN"){uint n;if(!uint.TryParse(v,NumberStyles.None,CultureInfo.InvariantCulture,out n)||n==0||n==uint.MaxValue)throw new InvalidDataException("Invalid ASN");numbers.Add(n);}
@@ -91,8 +95,14 @@ namespace AdvancedAINetwork.Gateway {
         }
         public string DnsSource(){return new JavaScriptSerializer().Serialize(new{version=3,rules=new[]{new{domain=exact,domain_suffix=roots,domain_keyword=keywords}}});}
         public string Provider(bool domainsOnly){
-            var lines=roots.Select(x=>"DOMAIN-SUFFIX,"+x).Concat(exact.Select(x=>"DOMAIN,"+x)).Concat(keywords.Select(x=>"DOMAIN-KEYWORD,"+x));
-            if(!domainsOnly)lines=lines.Concat(processes.Select(x=>"PROCESS-NAME,"+x)).Concat(ipv4.Concat(announced).Distinct().Select(x=>"IP-CIDR,"+x+",no-resolve")).Concat(asns.Select(x=>"IP-ASN,"+x+",no-resolve"));
+            // Clash also uses the domain provider for DNS and fake-IP selection.
+            Func<string,bool,string> clause=(rule,overlaps)=>overlaps ? "AND,((NOT,((DOMAIN,"+DownloadDomain+"))),("+rule+"))" : rule;
+            var lines=roots.Select(x=>clause("DOMAIN-SUFFIX,"+x,DownloadDomain==x||DownloadDomain.EndsWith("."+x,StringComparison.Ordinal)))
+                .Concat(exact.Where(x=>!IsDownload(x)).Select(x=>"DOMAIN,"+x))
+                .Concat(keywords.Select(x=>clause("DOMAIN-KEYWORD,"+x,DownloadDomain.Contains(x))));
+            if(!domainsOnly)lines=lines.Concat(processes.Select(x=>clause("PROCESS-NAME,"+x,true)))
+                .Concat(ipv4.Concat(announced).Distinct().Select(x=>clause("IP-CIDR,"+x+",no-resolve",true)))
+                .Concat(asns.Select(x=>clause("IP-ASN,"+x+",no-resolve",true)));
             return "payload:\n"+string.Join("\n",lines.Select(x=>"  - "+x))+"\n";
         }
     }

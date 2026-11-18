@@ -5,9 +5,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $package=$PSScriptRoot;$name='AdvancedAINetworkLanGateway';$root=Join-Path $env:ProgramData $name
-$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.6'
+$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.7-dev'
 $runKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$result=[ordered]@{success=$false;version='0.6.9-lan.6';check_only=[bool]$CheckOnly}
+$result=[ordered]@{success=$false;version='0.6.9-lan.7-dev';check_only=[bool]$CheckOnly}
 $backup=$null;$stopped=$false;$created=$false;$oldRun=$null;$uiStopped=$false;$oldRoot=$null;$oldLauncher=$null
 function Save-Json($path,$data){[IO.File]::WriteAllText($path,($data|ConvertTo-Json -Depth 15),[Text.UTF8Encoding]::new($false))}
 function No-Link([string]$path){if((Test-Path -LiteralPath $path)-and((Get-Item -LiteralPath $path -Force).Attributes-band[IO.FileAttributes]::ReparsePoint)){throw ('目录不能是链接：'+$path)}}
@@ -63,7 +63,7 @@ try{
     $policyTool=Join-Path $package 'Tools\GuardPolicyTool.exe'
     & $policyTool prepare $rulesFile
     if($LASTEXITCODE-ne 0){throw 'Windows 持久阻断未通过核验，安装已停止。'}
-    if($existing){$backup=Join-Path $root ('backup-'+(Get-Date -Format yyyyMMdd-HHmmss));$null=New-Item -ItemType Directory -Path $backup;foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','config.json','intent.json')){if(Test-Path (Join-Path $root $file)){Copy-Item (Join-Path $root $file) $backup}};Stop-Service $name -ErrorAction Stop;$stopped=$true}
+    if($existing){$backup=Join-Path $root ('backup-'+(Get-Date -Format yyyyMMdd-HHmmss));$null=New-Item -ItemType Directory -Path $backup;foreach($file in @('GatewayService.exe','TailscaleExit.exe','ProxyBridgeCore.dll','WinDivert.dll','config.json','intent.json')){if(Test-Path (Join-Path $root $file)){Copy-Item (Join-Path $root $file) $backup}};Stop-Service $name -ErrorAction Stop;$stopped=$true}
     $guard=(& (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Status)|ConvertFrom-Json
     if(!$guard.protected-or!$guard.tun_ready-or!$guard.dns_64_65_blocked-or!$guard.keyword_system_enabled-or!(Test-Path -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe'))-or(Get-FileHash -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe')).Hash-ne(Get-FileHash -LiteralPath (Join-Path $package 'Guard\AdvancedAINetworkGuard.exe')).Hash){
         & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Enable -SystemKeywords
@@ -75,7 +75,7 @@ try{
     $null=New-Item -ItemType Directory -Path $appRoot -Force
     foreach($item in Get-ChildItem (Join-Path $package 'App')){Copy-Item -LiteralPath $item.FullName -Destination $appRoot -Recurse -Force}
     & icacls.exe $appRoot /grant '*S-1-15-2-1:(OI)(CI)(RX)' /Q|Out-Null;if($LASTEXITCODE-ne 0){throw '无法为 Electron 沙箱设置读取权限。'}
-    foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')){Copy-Item -LiteralPath (Join-Path $package ('Gateway\'+$file)) -Destination $root -Force}
+    foreach($file in @('GatewayService.exe','TailscaleExit.exe','Tailscale-Licenses.txt','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')){Copy-Item -LiteralPath (Join-Path $package ('Gateway\'+$file)) -Destination $root -Force}
     Save-Json (Join-Path $root 'config.json') @{owner_sid=$owner;desktop_image=$Desktop;code_image=$Code;adapter=$Adapter;gateway=$Gateway;front_port=$ClashPort}
     Save-Json (Join-Path $root 'intent.json') @{enabled=$true}
     if(!$driver){& "$env:WINDIR\System32\sc.exe" create WinDivert type= kernel start= demand binPath= ('"'+(Join-Path $root 'WinDivert64.sys')+'"')|Out-Null;if($LASTEXITCODE-ne 0){throw '无法注册已签名的 WinDivert 驱动。'}}

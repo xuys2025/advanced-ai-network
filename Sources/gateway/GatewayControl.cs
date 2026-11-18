@@ -13,6 +13,8 @@ public sealed partial class GatewayService {
     GatewayTransport.Route candidate;
     string candidateGateway="",candidateToken="",lastLocation="",lastColo="";
     DateTime candidateExpiry;
+    volatile TailscaleLink pendingLogin;
+    string LoginUrl(){var link=pendingLogin??(transport==null?null:transport.ActiveTailscale);return link==null?"":link.LoginUrl;}
     Dictionary<string,object> candidateExit;
     static string ReadCommand(NamedPipeServerStream pipe){
         var read=Task.Run(()=>{var bytes=new List<byte>();for(int i=0;i<2048;i++){int b=pipe.ReadByte();if(b<0)throw new EndOfStreamException();if(b==10)return Encoding.UTF8.GetString(bytes.ToArray()).Trim();bytes.Add((byte)b);}throw new IOException("命令过长。");});
@@ -40,15 +42,21 @@ public sealed partial class GatewayService {
         }
     }
     Dictionary<string,object> ProbeRoute(GatewayTransport.Route route){
+        var tail=route.Link as TailscaleLink;
+        long generation=tail==null?0:tail.Generation;
         using(var socket=transport.OpenTcp(new GatewayDns(transport,route).Resolve("one.one.one.one"),443,route))
-            return (Dictionary<string,object>)LinkProbe.HttpsTrace(socket.Client);
+            {
+                var result=(Dictionary<string,object>)LinkProbe.HttpsTrace(socket.Client);
+                if(tail!=null)tail.Confirm(generation);
+                return result;
+            }
     }
     void SetExit(Dictionary<string,object> result){lastExit=Str(result,"ip");lastLocation=Str(result,"loc");lastColo=Str(result,"colo");lastCheck=DateTime.UtcNow.ToString("o");}
     void ClearCandidate(){if(candidate!=null)candidate.Dispose();candidate=null;candidateToken="";candidateExit=null;}
     void ExpireCandidate(){lock(sync){if(!operationBusy&&candidate!=null&&DateTime.UtcNow>=candidateExpiry){ClearCandidate();operation=new{phase="expired",message="验证已过期，请重新验证。"};}}}
     void BeginValidation(string target,bool checkOnly){
-        target=GatewayLink.ParseGateway(target).ToString();
-        if(GatewayLink.ResolveSource(adapter,target)!=local)throw new IOException("新网关必须与当前连接使用同一个本机 IPv4 地址。");
+        if(GatewayTransport.IsTailscale(target))TailscaleLink.ParseNode(target.Substring(GatewayTransport.TailPrefix.Length));
+        else if(GatewayLink.ResolveSource(adapter,target)!=local)throw new IOException("新网关必须与当前连接使用同一个本机 IPv4 地址。");
         lock(sync){
             if(operationBusy)throw new IOException("正在处理上一次操作，请稍候。");
             ClearCandidate();operationBusy=true;operation=new{phase="validating",gateway=target};
@@ -56,6 +64,8 @@ public sealed partial class GatewayService {
                 GatewayTransport.Route route=null;
                 try{
                     route=checkOnly?transport.RetainActiveRoute():transport.CreateRoute(target);
+                    var tail=route.Link as TailscaleLink;
+                    if(tail!=null){pendingLogin=tail;tail.WaitReady(stopping);}
                     var result=ProbeRoute(route);
                     lock(sync){
                         if(stopping.WaitOne(0))return;
@@ -63,7 +73,7 @@ public sealed partial class GatewayService {
                         else{candidate=route;route=null;candidateGateway=target;candidateExit=result;candidateToken=Guid.NewGuid().ToString("N");candidateExpiry=DateTime.UtcNow.AddMinutes(5);operation=new{phase="validated",gateway=target,exit=result,token=candidateToken,expires_utc=candidateExpiry.ToString("o")};}
                     }
                 }catch(Exception error){operation=new{phase="failed",gateway=target,message="网关验证失败："+error.GetBaseException().Message};}
-                finally{if(route!=null)route.Dispose();operationBusy=false;}
+                finally{pendingLogin=null;if(route!=null)route.Dispose();operationBusy=false;}
             });
         }
     }
@@ -71,18 +81,21 @@ public sealed partial class GatewayService {
         lock(sync){
             applyRequested=false;
             using(var previous=transport.RetainActiveRoute()){
-                string oldGateway=gateway;bool changed=false;
+                string oldGateway=gateway;bool changed=false,wasReady=ready;
                 try{
                     if(candidate==null||candidateExpiry<=DateTime.UtcNow)throw new IOException("验证已过期。");
                     candidate.Link.Refresh();
+                    var tail=candidate.Link as TailscaleLink;
+                    if(tail!=null&&!tail.Verified)throw new IOException("出口状态已变化，请重新验证。");
                     var config=ReadJson(Path.Combine(Root,"config.json"));config["gateway"]=candidateGateway;
+                    config["lan_gateway"]=GatewayTransport.IsTailscale(candidateGateway)?lanGateway:candidateGateway;
                     if(gateway!=candidateGateway){CloseProxies();transport.ActivateRoute(candidate);changed=true;if(enabled&&guardReady)OpenProxies();}
                     Atomic(Path.Combine(Root,"config.json"),config);
-                    gateway=candidateGateway;SetExit(candidateExit);ready=enabled&&guardReady;
+                    gateway=candidateGateway;lanGateway=Str(config,"lan_gateway");SetExit(candidateExit);ready=enabled&&guardReady;
                     operation=new{phase="applied",gateway=gateway,exit=candidateExit,checked_utc=lastCheck};
                 }catch(Exception error){
-                    if(changed){CloseProxies();transport.ActivateRoute(previous);if(enabled&&guardReady)OpenProxies();}
-                    gateway=oldGateway;ready=enabled&&guardReady;operation=new{phase="failed",message="切换未完成，已保留原出口："+error.GetBaseException().Message};
+                    if(changed){CloseProxies();transport.ActivateRoute(previous);if(wasReady&&enabled&&guardReady)OpenProxies();}
+                    gateway=oldGateway;ready=wasReady&&enabled&&guardReady;operation=new{phase="failed",message="切换未完成，已保留原出口："+error.GetBaseException().Message};
                 }finally{ClearCandidate();operationBusy=false;}
             }
         }

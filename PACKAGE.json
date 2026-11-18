@@ -1,7 +1,8 @@
 {
-  "version": "0.6.9-lan.6",
+  "version": "0.6.9-lan.7-dev",
   "platform": "Windows x64",
   "mode": "lan-gateway",
+  "supported_exit_modes": ["lan-gateway", "tailscale"],
   "contains_source": true,
   "npcap_bundled": false,
   "gateway_preconfigured": false,

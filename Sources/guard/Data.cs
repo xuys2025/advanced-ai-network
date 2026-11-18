@@ -21,7 +21,7 @@ public static class Data {
     public const string Group="Advanced-AI-Network", Front="Advanced-AI-Front", Local="Advanced-AI-Network-Local";
     public const int ProxyPort=17891;
     static readonly string[] BuiltInRoots={AiCompatibility.S_d318762d9a7b1e,AiCompatibility.S_c55d5f6562819e,"antspace.dev","clau.de",AiCompatibility.S_743e483ae01f1f,AiCompatibility.S_3c3a75765581d1,AiCompatibility.S_ba35b59b5869e8,AiCompatibility.S_b55da41d0fb07a,AiCompatibility.S_c3b2d321f93f6b,AiCompatibility.S_cceb19833d60dc,AiCompatibility.S_9bf2a517ed3cdf,AiCompatibility.S_4d8d78a2b2b457,AiCompatibility.S_a1101ea07e3e93,AiCompatibility.S_62e4eb09895085,"modelcontextprotocol.com","modelcontextprotocol.io","modelcontextprotocol.net","modelcontextprotocol.org","ant.dev",AiCompatibility.S_e8d2487918725c,AiCompatibility.S_377781691d8cda,AiCompatibility.S_ea80aaae921557,AiCompatibility.S_2d7a1683632e95,"intercom.io","intercomcdn.com","interface.feedback","lcicat.org","lcicollections.org","mcpservertest.online","muthos.com","sentry.io","sillylittleguy.org","statsigapi.net"};
-    static readonly string[] BuiltInExact={"api.ipify.org","icanhazip.com","ifconfig.me","ip.net.coffee",AiCompatibility.S_783a5375a32dd3,AiCompatibility.S_7361a0b35b1d80,AiCompatibility.S_1e461caa6d3581,"browser-intake-us5-datadoghq.com","cdn.growthbook.io","cdn.usefathom.com",AiCompatibility.S_10aec8d3389d2c,"storage.googleapis.com"};
+    static readonly string[] BuiltInExact={"challenges.cloudflare.com","api.ipify.org","icanhazip.com","ifconfig.me","ip.net.coffee",AiCompatibility.S_783a5375a32dd3,AiCompatibility.S_7361a0b35b1d80,AiCompatibility.S_1e461caa6d3581,"browser-intake-us5-datadoghq.com","cdn.growthbook.io","cdn.usefathom.com",AiCompatibility.S_10aec8d3389d2c,"storage.googleapis.com"};
     static readonly string[] BuiltInKeywords={"datadog","sentry","sift"};
     public static readonly string[] Namespaces=BuiltInRoots.SelectMany(x=>new[]{x,"."+x}).Concat(BuiltInExact).ToArray();
     public static readonly string ManagedDomainsPath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"AdvancedAINetworkLanGateway","managed-domains.json");
@@ -41,6 +41,7 @@ public static class Data {
                 using(var reader=new StreamReader(file)){
                     var parsed=new JavaScriptSerializer().Deserialize<DomainFile>(reader.ReadToEnd()).rules.Single();
                     if(parsed.domain==null||parsed.domain_suffix==null||parsed.domain_keyword==null)throw new InvalidDataException("Incomplete domain manifest");
+                    if(!parsed.domain.Contains("challenges.cloudflare.com"))parsed.domain=parsed.domain.Concat(new[]{"challenges.cloudflare.com"}).ToArray();
                     Volatile.Write(ref live,parsed);stamp=info.LastWriteTimeUtc;
                 }
             }

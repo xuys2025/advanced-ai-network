@@ -24,7 +24,8 @@ public static class GuardPolicy {
             route["rule_set"]=new[]{Data.Obj("tag","live-domains","type","local","format","source","path",Data.ManagedDomainsPath)};
             var dns=(Dictionary<string,object>)config["dns"];
             var rules=(Dictionary<string,object>[])dns["rules"];
-            rules[0]=Data.Obj("inbound",new[]{"policy-dns"},"rule_set",new[]{"live-domains"},"action","route","server","guard-dns");
+            dns["rules"]=new[]{Data.Obj("inbound",new[]{"policy-dns"},"domain",new[]{"challenges.cloudflare.com"},"action","route","server","guard-dns"),
+                Data.Obj("inbound",new[]{"policy-dns"},"rule_set",new[]{"live-domains"},"action","route","server","guard-dns"),rules[1],rules[2]};
         }
         return config;}
     public static Dictionary<string,object> Status(){

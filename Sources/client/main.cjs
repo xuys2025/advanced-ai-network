@@ -1,5 +1,5 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,Tray,Menu,nativeImage}=require('electron');
+const {app,BrowserWindow,ipcMain,Tray,Menu,nativeImage,shell}=require('electron');
 const path=require('node:path');
 const fs=require('node:fs');
 const AICompat=require('./compatibility.cjs');
@@ -30,7 +30,7 @@ else {
     const icon=nativeImage.createFromPath(path.join(__dirname,'icon.png'));tray=new Tray(icon);
     tray.setContextMenu(Menu.buildFromTemplate([{label:'打开 高级 AI 专用网络',click:restore},{type:'separator'},{label:'退出界面（后台继续运行）',click:()=>quitInterface('用户退出局域网出口界面')}]));tray.on('double-click',restore);
     bridge=new NativeBridge(path.join(process.resourcesPath,'native','AdvancedAINetworkAgent.exe'));
-    const publish=value=>{state={...value,desktop_preferences:preferences.current()};if(!window.isDestroyed())window.webContents.send('state',state);tray.setToolTip('高级 AI 专用网络 · '+(state.ready?'局域网出口已连接':'等待连接'));try{if(testAt>=0)return;const file=path.join(process.env.LOCALAPPDATA,'AdvancedAIPrivateNetwork','runtime-status.json'),temp=file+'.lan.tmp';fs.writeFileSync(temp,JSON.stringify({...state,connected:!!state.ready,verified_ingress:!!state.ready,pid:process.pid,agent_pid:bridge.child?.pid,updated_utc:new Date().toISOString()}));fs.renameSync(temp,file);}catch{}};
+    const publish=value=>{state={...value,desktop_preferences:preferences.current()};if(!window.isDestroyed())window.webContents.send('state',state);tray.setToolTip('高级 AI 专用网络 · '+(state.ready?(state.mode==='tailscale'?'Tailscale 出口已连接':'局域网出口已连接'):'等待连接'));try{if(testAt>=0)return;const file=path.join(process.env.LOCALAPPDATA,'AdvancedAIPrivateNetwork','runtime-status.json'),temp=file+'.lan.tmp';fs.writeFileSync(temp,JSON.stringify({...state,connected:!!state.ready,verified_ingress:!!state.ready,pid:process.pid,agent_pid:bridge.child?.pid,updated_utc:new Date().toISOString()}));fs.renameSync(temp,file);}catch{}};
     window.on('focus',()=>{preferences.refresh();publish(state);});
     bridge.on('state',publish);bridge.on('fault',error=>publish({...state,ready:false,message:error}));bridge.start();
     if(testAt>=0){
@@ -66,7 +66,15 @@ else {
     ipcMain.handle('state',event=>{trusted(event);return {...state,desktop_preferences:preferences.current()};});
     ipcMain.handle('preferences:read',event=>{trusted(event);preferences.refresh();publish(state);return state;});
     ipcMain.handle('preferences:save',(event,patch)=>{trusted(event);try{preferences.update(patch);}finally{publish(state);}return state;});
-    ipcMain.handle('action',async(event,name,params={})=>{trusted(event);if(!['connect','disconnect','check','gateway:validate','gateway:apply','rules:refresh','rules:auto-on','rules:auto-off'].includes(name))throw new Error('不支持的操作');if(name.startsWith('gateway:')){const key=name==='gateway:validate'?'gateway':'token';if(!params||typeof params[key]!=='string'||params[key].length>64)throw new Error('无效的出口参数');params={[key]:params[key]};}else params={};return bridge.request(name,params);});
+    ipcMain.handle('action',async(event,name,params={})=>{trusted(event);
+      if(name==='tailscale:login'){
+        const {url}=await bridge.request(name);
+        if(!url)throw new Error('当前没有等待授权的 Tailscale 会话。');
+        const dest=new URL(url);
+        if(dest.origin!=='https://login.tailscale.com'||dest.username||dest.password)throw new Error('无效的 Tailscale 登录地址。');
+        await shell.openExternal(dest.href);return;
+      }
+      if(!['connect','disconnect','check','gateway:validate','gateway:apply','rules:refresh','rules:auto-on','rules:auto-off'].includes(name))throw new Error('不支持的操作');if(name.startsWith('gateway:')){const key=name==='gateway:validate'?'gateway':'token';if(!params||typeof params[key]!=='string'||params[key].length>64)throw new Error('无效的出口参数');params={[key]:params[key]};}else params={};return bridge.request(name,params);});
     function trusted(event){if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame)throw new Error('无效的界面来源');}
   });
   app.on('before-quit',()=>{quitting=true;bridge?.close();});

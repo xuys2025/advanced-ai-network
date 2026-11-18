@@ -4,7 +4,13 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const script=fs.readFileSync(path.join(__dirname,'Clash-Rules.js'),'utf8');
 const context=vm.createContext({});vm.runInContext(script,context);const apply=context.applyAdvancedAINetworkLan;
 const config={proxies:[{name:'original',type:'socks5',server:'example.net',port:1080}],rules:['DOMAIN,example.com,original','MATCH,original'],dns:{'enhanced-mode':'fake-ip','fake-ip-range':'198.18.0.1/16','fake-ip-filter':['local.example'],'nameserver-policy':{[AICompat.S_3ce3c6daf93d2d]:'https://example.net/dns-query'}}};
-apply(config);assert.equal(config.proxies[0].name,'original');assert.equal(config.proxies.length,2);assert.equal(config.rules.at(-1),'MATCH,original');assert.equal(config.dns['nameserver-policy']['example.com'],'https://example.net/dns-query');assert.equal(config.dns['nameserver-policy']['rule-set:AdvancedAINetworkManagedDomains'],'tcp://127.0.0.2:53');assert(config.dns['fake-ip-filter'].includes('local.example'));const once=JSON.stringify(config);apply(config);assert.equal(JSON.stringify(config),once);
+apply(config);assert.equal(config.proxies[0].name,'original');assert.equal(config.proxies.length,2);assert.equal(config.rules.at(-1),'MATCH,original');assert.equal(config.dns['nameserver-policy']['example.com'],'https://example.net/dns-query');assert.equal(config.dns['nameserver-policy']['rule-set:AdvancedAINetworkManagedDomains'],'tcp://127.0.0.2:53');assert(config.dns['fake-ip-filter'].includes('local.example'));const download='downloads.'+AICompat.S_743e483ae01f1f;
+assert.equal(config.dns['nameserver-policy'][download],'https://example.net/dns-query');
+const dedicated=config.rules.find(r=>r.startsWith('AND,'));
+assert.equal(dedicated,'AND,((NOT,((DOMAIN,'+download+'))),(RULE-SET,AdvancedAINetworkManaged)),Advanced-AI-Network-LAN');
+assert(config.rules.indexOf('DOMAIN,challenges.cloudflare.com,Advanced-AI-Network-LAN')<config.rules.indexOf('MATCH,original'));
+assert(!config.rules.some(r=>r.startsWith('DOMAIN,'+download+',')));
+const once=JSON.stringify(config);apply(config);assert.equal(JSON.stringify(config),once);
 assert.throws(()=>apply({dns:{'enhanced-mode':'fake-ip','fake-ip-range':'198.19.0.0/16'}}),/冲突/);
 assert.throws(()=>apply({proxies:[{name:'Advanced-AI-Network-LAN',type:'direct'}]}),/占用/);
 assert.throws(()=>apply({dns:{'fake-ip-filter-mode':'whitelist'}}),/blacklist/);
