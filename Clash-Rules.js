@@ -83,7 +83,7 @@ function applyAdvancedAINetworkLan(config) {
   if((config['proxy-groups']||[]).some(p=>p.name===name))throw new Error('Advanced-AI-Network-LAN 名称已被其他策略组占用。');
   config.proxies=(config.proxies||[]).filter(p=>p.name!==name).concat([{name,type:'http',server:'127.0.0.1',port:17891}]);
   const rules=['IP-CIDR,127.0.0.2/32,DIRECT,no-resolve','IP-CIDR,198.19.64.0/18,DIRECT,no-resolve'];
-  config.rules=rules.concat((config.rules||[]).filter(r=>!rules.includes(r)&&!r.endsWith(','+name)));
+  config.rules=rules.concat((config.rules||[]).filter(r=>!rules.includes(r)));
   config.dns=config.dns||{};
   if(config.dns['enhanced-mode']==='fake-ip'){
     const [base,bitsText]=String(config.dns['fake-ip-range']||'198.18.0.1/16').split('/'),bytes=base.split('.').map(Number),bits=Number(bitsText);

@@ -110,8 +110,8 @@ function AssertNoConflicts($allRules) {
     $conflicts=@($allRules | Where-Object {$_.Comment -ne $comment -and @($_.Namespace | Where-Object {$claimed -contains $_}).Count -gt 0})
     if($conflicts.Count -gt 0){throw '存在其他软件或管理员设置的同名 DNS 策略。请先停用旧 高级 AI 专用客户端并检查冲突，本程序不会删除它们。'}
 }
-function Get-EffectiveCoverage {
-    $keywordSystem=Test-Path -LiteralPath $keywordMarker
+function Get-EffectiveCoverage([switch]$IncludeWildcard) {
+    $keywordSystem=$IncludeWildcard -or (Test-Path -LiteralPath $keywordMarker)
     $expected=@{}
     foreach($name in $namespaces){$expected[$name]=$dispatchDns}
     if($keywordSystem){$expected['.']='127.0.0.3'}
@@ -166,12 +166,17 @@ if($Action -eq 'Disable'){
 }
 # Never replace existing namespace policy installed by another VPN or administrator.
 if($Action -ne 'Repair'){AssertNoConflicts @(Get-DnsClientNrptRule -ErrorAction Stop)}
-function RepairRules {
+function RepairRules([switch]$ActivateKeywords) {
     $lockPath=Join-Path $guardPath 'policy.lock'
     $policyLock=$null
     for($attempt=0;$attempt -lt 30 -and $null -eq $policyLock;$attempt++){try{$policyLock=[IO.File]::Open($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}catch [IO.IOException]{Start-Sleep -Milliseconds 100}}
     if($null -eq $policyLock){throw '域名策略正在维护，稍后重试。'}
+    $newWildcard=$null
     try{
+        # Read the committed mode after acquiring the lock. A maintenance worker
+        # can have started before the installer finished switching DNS.
+        $keywordMode=$ActivateKeywords -or (Test-Path -LiteralPath $keywordMarker)
+        $script:dispatchDns=if($keywordMode -and (Test-Path -LiteralPath $managed)){'127.0.0.3'}else{'127.0.0.2'}
         $allRules=@(Get-DnsClientNrptRule -ErrorAction Stop)
         AssertNoConflicts $allRules
         $byName=@{}
@@ -182,16 +187,27 @@ function RepairRules {
                 $null=$byName[$name].Add($rule)
             }
         }
-        if(Test-Path -LiteralPath $keywordMarker){
-            $any=$byName['.']
-            if(!$byName.ContainsKey('.')){$null=Add-DnsClientNrptRule -Namespace '.' -NameServers '127.0.0.3' -Comment $comment -DisplayName '高级 AI 专用网络 keyword DNS'}
-            else{foreach($r in $any){if(@($r.NameServers).Count -ne 1 -or $r.NameServers -notcontains '127.0.0.3'){Set-DnsClientNrptRule -Name $r.Name -NameServers '127.0.0.3'}}}
-        }
         foreach($name in $namespaces){
             $matching=$byName[$name]
             if(!$byName.ContainsKey($name)){$null=Add-DnsClientNrptRule -Namespace $name -NameServers $dispatchDns -Comment $comment -DisplayName ('高级 AI 专用网络 '+$name)}
             else{foreach($rule in $matching){$servers=@($rule.NameServers);if($servers.Count -ne 1 -or $servers[0] -ne $dispatchDns){Set-DnsClientNrptRule -Name $rule.Name -NameServers $dispatchDns}}}
         }
+        if($keywordMode){
+            if(!$byName.ContainsKey('.')){
+                $newWildcard=Add-DnsClientNrptRule -Namespace '.' -NameServers '127.0.0.3' -Comment $comment -DisplayName '高级 AI 专用网络 keyword DNS' -PassThru
+            }else{foreach($r in $byName['.']){if(@($r.NameServers).Count -ne 1 -or $r.NameServers -notcontains '127.0.0.3'){Set-DnsClientNrptRule -Name $r.Name -NameServers '127.0.0.3'}}}
+        }
+        if($ActivateKeywords){
+            $coverage=Get-EffectiveCoverage -IncludeWildcard
+            if($coverage.covered -ne $coverage.required){throw '有效 DNS 策略未完整生效。'}
+            [IO.File]::WriteAllText($keywordMarker,'Apply rule keyword matching to Windows DNS')
+        }
+    }catch{
+        if($ActivateKeywords -and $null -ne $newWildcard){
+            Remove-DnsClientNrptRule -Name $newWildcard.Name -Force
+            Clear-DnsClientCache
+        }
+        throw
     }finally{$policyLock.Dispose()}
 }
 if($Action -eq 'Repair'){
@@ -227,8 +243,6 @@ $script:logSafe=$true
 AssertTunRangeAvailable
 [IO.File]::WriteAllText($tunMarker,'198.19.64.0/18',(New-Object Text.UTF8Encoding($false)))
 RepairTunSafety
-if($SystemKeywords){[IO.File]::WriteAllText($keywordMarker,'Apply rule keyword matching to Windows DNS',(New-Object Text.UTF8Encoding($false)))}
-RepairRules
 if(Test-Path -LiteralPath $guardExe){
     if(((Get-Item -LiteralPath $guardExe -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw '服务程序不能是链接或重解析点。'}
 }
@@ -275,7 +289,23 @@ try{
     }
     throw '新保护服务未启动，已尝试恢复原程序；所有已有 DNS 限制均保留。请检查服务事件记录。'
 }
-# Create all owned rules in one operation; failures keep already installed protection.
-RepairRules
+if($SystemKeywords -and !(Test-Path -LiteralPath $keywordMarker)){
+    # The service bootstraps its TUN with only the scoped policy in place.
+    # Verify both DNS paths directly before committing the machine-wide rule.
+    $deadline=[DateTime]::UtcNow.AddSeconds(75)
+    do{
+        try{
+            $protected=@(Resolve-DnsName api.ipify.org -Type A -Server 127.0.0.3 -DnsOnly -NoHostsFile -QuickTimeout -ErrorAction Stop | Where-Object Type -eq A)
+            $ordinary=@(Resolve-DnsName example.com -Type A -Server 127.0.0.3 -DnsOnly -NoHostsFile -QuickTimeout -ErrorAction Stop | Where-Object Type -eq A)
+            $synthetic='^198\.19\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.'
+            if(!$protected.Count -or @($protected | Where-Object IPAddress -NotMatch $synthetic).Count -or !$ordinary.Count -or @($ordinary | Where-Object IPAddress -Match $synthetic).Count){throw '本机解析器尚未通过普通与受保护域名检查。'}
+            break
+        }catch{
+            if([DateTime]::UtcNow -ge $deadline){throw}
+            Start-Sleep -Seconds 1
+        }
+    }while($true)
+    RepairRules -ActivateKeywords
+}else{RepairRules}
 Clear-DnsClientCache
 Status

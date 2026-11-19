@@ -33,7 +33,7 @@ public sealed partial class GatewayService {
             }return;
         }
         lock(sync){
-            if(operationBusy)throw new IOException("正在验证或切换出口，请稍候。");
+            if(operationBusy&&command!="disable")throw new IOException("正在验证或切换出口，请稍候。");
             if(command=="check"){requestCheck=true;return;}
             if(command!="enable"&&command!="disable")throw new IOException("不支持的网关操作。");
             bool next=command=="enable";if(!next)networkGuard.Pause();Atomic(Path.Combine(Root,"intent.json"),new{enabled=next});enabled=next;if(next)requestCheck=true;
@@ -74,15 +74,16 @@ public sealed partial class GatewayService {
                 string oldGateway=gateway;bool changed=false;
                 try{
                     if(candidate==null||candidateExpiry<=DateTime.UtcNow)throw new IOException("验证已过期。");
+                    if(!guardReady)throw new IOException("域名保护未就绪。");
                     candidate.Link.Refresh();
                     var config=ReadJson(Path.Combine(Root,"config.json"));config["gateway"]=candidateGateway;
-                    if(gateway!=candidateGateway){CloseProxies();transport.ActivateRoute(candidate);changed=true;if(enabled&&guardReady)OpenProxies();}
+                    if(gateway!=candidateGateway){transport.RuleForwarding=false;CloseProxies();transport.ActivateRoute(candidate);changed=true;}
                     Atomic(Path.Combine(Root,"config.json"),config);
-                    gateway=candidateGateway;SetExit(candidateExit);ready=enabled&&guardReady;
+                    gateway=candidateGateway;SetExit(candidateExit);
                     operation=new{phase="applied",gateway=gateway,exit=candidateExit,checked_utc=lastCheck};
                 }catch(Exception error){
-                    if(changed){CloseProxies();transport.ActivateRoute(previous);if(enabled&&guardReady)OpenProxies();}
-                    gateway=oldGateway;ready=enabled&&guardReady;operation=new{phase="failed",message="切换未完成，已保留原出口："+error.GetBaseException().Message};
+                    if(changed)transport.ActivateRoute(previous);
+                    gateway=oldGateway;operation=new{phase="failed",message="切换未完成，已保留原出口："+error.GetBaseException().Message};
                 }finally{ClearCandidate();operationBusy=false;}
             }
         }

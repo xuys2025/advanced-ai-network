@@ -163,6 +163,8 @@ public sealed partial class GatewayService : ServiceBase {
                 progress.Enter(GatewayStage.CheckWorkers);
                 if(!NativeBridge.Alive()||!transport.Ready)throw new IOException("Network worker stopped.");
                 progress.Enter(GatewayStage.ReadGuard);guardReady=Guard();
+                // A validated replacement must work even after the old next hop goes offline.
+                if(applyRequested){progress.Enter(GatewayStage.ApplyGateway);ApplyCandidate();nextLink=DateTime.MinValue;}
                 if(!guardReady){progress.Enter(GatewayStage.CloseRelays);linkReady=false;nextLink=DateTime.MinValue;transport.RuleForwarding=false;CloseProxies();}
                 else if(DateTime.UtcNow>=nextLink){
                     try{progress.Enter(GatewayStage.RefreshGateway);transport.RefreshLink();progress.Enter(GatewayStage.BindRelay);linkReady=BindRelay();}
@@ -175,7 +177,6 @@ public sealed partial class GatewayService : ServiceBase {
                 progress.Enter(!enabled||!guardReady||!linkReady?GatewayStage.CloseRelays:GatewayStage.OpenRelays);
                 if(!enabled||!guardReady||!linkReady){CloseProxies();message=enabled?"等待域名保护与网关恢复，目标流量暂停。":"专用连接已暂停，域名保护保留。";}
                 else{OpenProxies();ready=true;message="命中域名、IPv4 网段、ASN 或程序名的连接经 "+gateway+"；其他程序保留原路径。";}
-                if(applyRequested&&guardReady&&linkReady){progress.Enter(GatewayStage.ApplyGateway);ApplyCandidate();}
                 progress.Enter(GatewayStage.ControlCommands);
                 lock(sync){if(requestCheck&&!operationBusy){requestCheck=false;BeginValidation(gateway,true);}}
                 ExpireCandidate();

@@ -30,7 +30,7 @@ function renderOperation(){const op=state.gateway_operation||{},busy=pending||['
   else if(op.phase==='failed'&&(match||!op.gateway)){box.className='validation warn';title='未更改当前出口';detail=op.message||'请检查网关后重试。';}
   else if(op.phase==='expired'){detail='验证结果已过期，请重新验证后保存。';}
   box.replaceChildren();if(title)box.append(node('strong','',title));box.append(node('span','',detail));
-  $('check').disabled=busy||state.stale||!state.gateway;$('toggle').disabled=busy||state.stale||!state.gateway;
+  $('check').disabled=busy||state.stale||!state.gateway;$('toggle').disabled=pending||(busy&&!state.enabled)||state.stale||!state.gateway;
   text('check-result',op.phase==='checked'?'检查通过 · '+op.exit?.ip+' · '+at(op.checked_utc):op.phase==='validating'?'正在检查出口…':op.phase==='failed'?op.message:'');
 }
 function render(s){state=s;renderFeed(s);const ready=!!s.ready,paused=s.enabled===false;

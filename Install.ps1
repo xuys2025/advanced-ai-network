@@ -9,6 +9,8 @@ $appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Joi
 $runKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $result=[ordered]@{success=$false;version='0.6.9-lan.6';check_only=[bool]$CheckOnly}
 $backup=$null;$stopped=$false;$created=$false;$oldRun=$null;$uiStopped=$false;$oldRoot=$null;$oldLauncher=$null
+$payloadChanged=$false;$runChanged=$false
+$gatewayFiles=@('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys','config.json','intent.json')
 function Save-Json($path,$data){[IO.File]::WriteAllText($path,($data|ConvertTo-Json -Depth 15),[Text.UTF8Encoding]::new($false))}
 function No-Link([string]$path){if((Test-Path -LiteralPath $path)-and((Get-Item -LiteralPath $path -Force).Attributes-band[IO.FileAttributes]::ReparsePoint)){throw ('目录不能是链接：'+$path)}}
 function Driver-Check([string]$path){if(!(Test-Path -LiteralPath $path)-or(Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant()-ne'8da085332782708d8767bcace5327a6ec7283c17cfb85e40b03cd2323a90ddc2'-or(Get-AuthenticodeSignature -LiteralPath $path).Status-ne'Valid'){throw 'WinDivert 驱动版本或签名不符；不会覆盖其他软件的驱动。'}}
@@ -63,9 +65,22 @@ try{
     $policyTool=Join-Path $package 'Tools\GuardPolicyTool.exe'
     & $policyTool prepare $rulesFile
     if($LASTEXITCODE-ne 0){throw 'Windows 持久阻断未通过核验，安装已停止。'}
-    if($existing){$backup=Join-Path $root ('backup-'+(Get-Date -Format yyyyMMdd-HHmmss));$null=New-Item -ItemType Directory -Path $backup;foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','config.json','intent.json')){if(Test-Path (Join-Path $root $file)){Copy-Item (Join-Path $root $file) $backup}};Stop-Service $name -ErrorAction Stop;$stopped=$true}
+    if($existing){
+        $oldStart=@{Auto='auto';Manual='demand';Disabled='disabled'}[$existing.StartMode]
+        if(!$oldStart -or $existing.State -notin 'Running','Stopped'){throw '服务正在切换状态，请稍后重试。'}
+        if($oldStart -eq 'auto' -and $existing.DelayedAutoStart){$oldStart='delayed-auto'}
+        $dependencies=@((Get-Service $name).ServicesDependedOn | ForEach-Object {$_.Name})
+        $oldDependencies=if($dependencies.Count){$dependencies -join '/'}else{'/'}
+        $backup=Join-Path $root ('backup-'+[Guid]::NewGuid().ToString('N'))
+        $null=New-Item -ItemType Directory -Path $backup
+        Stop-Service $name -ErrorAction Stop
+        $stopped=$true
+        foreach($file in $gatewayFiles){$path=Join-Path $root $file;if(Test-Path -LiteralPath $path){Copy-Item -LiteralPath $path -Destination $backup}}
+    }
     $guard=(& (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Status)|ConvertFrom-Json
-    if(!$guard.protected-or!$guard.tun_ready-or!$guard.dns_64_65_blocked-or!$guard.keyword_system_enabled-or!(Test-Path -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe'))-or(Get-FileHash -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe')).Hash-ne(Get-FileHash -LiteralPath (Join-Path $package 'Guard\AdvancedAINetworkGuard.exe')).Hash){
+    $installedSetup=Join-Path $env:ProgramData 'AdvancedAINetworkGuard\Guard-Setup.ps1'
+    $setupCurrent=(Test-Path -LiteralPath $installedSetup) -and (Get-FileHash -LiteralPath $installedSetup).Hash -eq (Get-FileHash -LiteralPath (Join-Path $package 'Guard\Guard-Setup.ps1')).Hash
+    if(!$setupCurrent-or!$guard.protected-or!$guard.tun_ready-or!$guard.dns_64_65_blocked-or!$guard.keyword_system_enabled-or!(Test-Path -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe'))-or(Get-FileHash -LiteralPath (Join-Path $env:ProgramData 'AdvancedAINetworkGuard\AdvancedAINetworkGuard.exe')).Hash-ne(Get-FileHash -LiteralPath (Join-Path $package 'Guard\AdvancedAINetworkGuard.exe')).Hash){
         & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Enable -SystemKeywords
         if($LASTEXITCODE-ne 0){throw '域名保护安装失败；已建立的保护规则会保留，详见修复说明。'}
         $deadline=[DateTime]::UtcNow.AddSeconds(40);do{Start-Sleep -Seconds 1;$guard=(& (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Status)|ConvertFrom-Json}while(!$guard.tun_ready-and[DateTime]::UtcNow-lt$deadline)
@@ -75,7 +90,11 @@ try{
     $null=New-Item -ItemType Directory -Path $appRoot -Force
     foreach($item in Get-ChildItem (Join-Path $package 'App')){Copy-Item -LiteralPath $item.FullName -Destination $appRoot -Recurse -Force}
     & icacls.exe $appRoot /grant '*S-1-15-2-1:(OI)(CI)(RX)' /Q|Out-Null;if($LASTEXITCODE-ne 0){throw '无法为 Electron 沙箱设置读取权限。'}
-    foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')){Copy-Item -LiteralPath (Join-Path $package ('Gateway\'+$file)) -Destination $root -Force}
+    $payloadChanged=$true
+    foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')){
+        $from=Join-Path $package ('Gateway\'+$file);$to=Join-Path $root $file
+        if(!(Test-Path -LiteralPath $to) -or (Get-FileHash -LiteralPath $to).Hash -ne (Get-FileHash -LiteralPath $from).Hash){Copy-Item -LiteralPath $from -Destination $to -Force}
+    }
     Save-Json (Join-Path $root 'config.json') @{owner_sid=$owner;desktop_image=$Desktop;code_image=$Code;adapter=$Adapter;gateway=$Gateway;front_port=$ClashPort}
     Save-Json (Join-Path $root 'intent.json') @{enabled=$true}
     if(!$driver){& "$env:WINDIR\System32\sc.exe" create WinDivert type= kernel start= demand binPath= ('"'+(Join-Path $root 'WinDivert64.sys')+'"')|Out-Null;if($LASTEXITCODE-ne 0){throw '无法注册已签名的 WinDivert 驱动。'}}
@@ -92,8 +111,10 @@ try{
     $afterProxy=Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'|Select-Object ProxyEnable,ProxyServer,AutoConfigURL
     $afterRoute=@(Get-NetRoute -DestinationPrefix '0.0.0.0/0'|Sort-Object InterfaceIndex,NextHop|Select-Object InterfaceIndex,NextHop,RouteMetric)
     if(($beforeProxy|ConvertTo-Json -Compress)-ne($afterProxy|ConvertTo-Json -Compress)-or($beforeRoute|ConvertTo-Json -Compress)-ne($afterRoute|ConvertTo-Json -Compress)){throw '检测到系统代理或默认路由变化，请检查其他网络软件。'}
-    $launcher=Join-Path $appRoot 'AdvancedAINetworkLauncher.exe';$null=New-Item -Path $runKey -Force
+    $launcher=Join-Path $appRoot 'AdvancedAINetworkLauncher.exe'
+    if(!(Test-Path -LiteralPath $runKey)){$null=New-Item -Path $runKey}
     Set-ItemProperty $runKey -Name AdvancedAIPrivateNetwork -Value ('"'+$launcher+'" --startup')
+    $runChanged=$true
     $shell=New-Object -ComObject WScript.Shell
     try{$shortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) '高级 AI 专用网络.lnk'));$shortcut.TargetPath=$launcher;$shortcut.WorkingDirectory=$appRoot;$shortcut.Save()}finally{[Runtime.InteropServices.Marshal]::ReleaseComObject($shell)|Out-Null}
     $null=New-Item -ItemType Directory -Path (Join-Path $env:LOCALAPPDATA 'AdvancedAIPrivateNetwork') -Force
@@ -109,12 +130,53 @@ try{
     Write-Host '安装器没有启动真实 高级 AI 程序，也没有修改 Clash、系统默认网关或网卡 IPv6 设置。'
 }catch{
     $result.error=$_.Exception.Message;$result.line=$_.InvocationInfo.ScriptLineNumber
-    if($stopped -or $created){
+    if($stopped){
+        $result.backup=$backup
+        try{
+            Stop-Service $name -ErrorAction Stop
+            if($payloadChanged){
+                foreach($file in $gatewayFiles){
+                    $saved=Join-Path $backup $file;$to=Join-Path $root $file
+                    if(Test-Path -LiteralPath $saved){
+                        if(!(Test-Path -LiteralPath $to) -or (Get-FileHash -LiteralPath $saved).Hash -ne (Get-FileHash -LiteralPath $to).Hash){Copy-Item -LiteralPath $saved -Destination $to -Force}
+                    }elseif(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Force}
+                }
+            }
+            & "$env:WINDIR\System32\sc.exe" config $name start= $oldStart depend= $oldDependencies | Out-Null
+            if($LASTEXITCODE){throw '无法恢复原服务启动配置。'}
+            if($existing.State -eq 'Running'){
+                & $policyTool audit $rulesFile
+                if($LASTEXITCODE){throw '原服务的持久阻断核验失败。'}
+                $proof=(& (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Status) | ConvertFrom-Json
+                if(!$proof.protected -or !$proof.tun_ready -or !$proof.dns_64_65_blocked){throw '域名保护未就绪。'}
+                Start-Service $name -ErrorAction Stop
+                $restoredPid=(Get-CimInstance Win32_Service -Filter "Name='$name'").ProcessId
+                $deadline=[DateTime]::UtcNow.AddSeconds(50)
+                do{
+                    Start-Sleep -Milliseconds 500
+                    try{$s=Get-Content (Join-Path $root 'status.json') -Raw -Encoding UTF8|ConvertFrom-Json
+                        $age=([DateTime]::UtcNow-[DateTime]::Parse($s.updated_utc).ToUniversalTime()).TotalSeconds
+                        $recovered=$s.service_pid -eq $restoredPid -and $s.capturing -and $s.guard_protected -and $age -ge 0 -and $age -lt 3 -and $s.ready -eq $s.enabled -and $s.process_ip_guard_live -eq $s.enabled
+                    }catch{$recovered=$false}
+                }while(!$recovered -and [DateTime]::UtcNow -lt $deadline)
+                if(!$recovered){throw '原服务恢复后未通过心跳核验。'}
+            }
+            $result.rollback='restored'
+        }catch{
+            $result.rollback='requires-repair';$result.rollback_error=$_.Exception.Message
+            Stop-Service $name -ErrorAction SilentlyContinue
+            Set-Service $name -StartupType Manual -ErrorAction SilentlyContinue
+            Write-Warning ("回滚未完成，请检查域名保护状态后重跑安装。备份目录："+$backup+"。原因："+$result.rollback_error)
+        }
+    }elseif($created){
         Stop-Service $name -ErrorAction SilentlyContinue
         Set-Service $name -StartupType Manual -ErrorAction SilentlyContinue
         $result.backup=$backup
     }
-    if($oldRun){Set-ItemProperty $runKey -Name AdvancedAIPrivateNetwork -Value $oldRun}
+    if($runChanged){
+        if($oldRun){Set-ItemProperty $runKey -Name AdvancedAIPrivateNetwork -Value $oldRun}
+        else{Remove-ItemProperty $runKey -Name AdvancedAIPrivateNetwork -ErrorAction SilentlyContinue}
+    }
     Write-Host ('安装未完成：'+$result.error) -ForegroundColor Red
     Write-Host '已有域名保护会保留。修好配置后重跑安装；要解除限制请阅读 Uninstall.ps1 的说明。'
 }finally{

@@ -9,4 +9,9 @@ assert.throws(()=>apply({dns:{'enhanced-mode':'fake-ip','fake-ip-range':'198.19.
 assert.throws(()=>apply({proxies:[{name:'Advanced-AI-Network-LAN',type:'direct'}]}),/占用/);
 assert.throws(()=>apply({dns:{'fake-ip-filter-mode':'whitelist'}}),/blacklist/);
 const ruleMode=apply({dns:{'fake-ip-filter-mode':'rule','fake-ip-filter':['MATCH,fake-ip']}});assert.equal(ruleMode.dns['fake-ip-filter'].at(-1),'MATCH,fake-ip');
-console.log('PASS Clash preservation, selected domain rules, idempotence, fake-IP conflicts and filter modes');
+const custom='DOMAIN,team.example,Advanced-AI-Network-LAN';
+config.rules.unshift(custom);
+apply(config);
+assert.equal(config.rules.filter(rule=>rule===custom).length,1);
+assert(config.rules.indexOf(custom)<config.rules.indexOf('MATCH,original'));
+console.log('PASS Clash preservation, custom routes, idempotence, fake-IP conflicts and filter modes');
