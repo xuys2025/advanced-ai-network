@@ -5,12 +5,26 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $package=$PSScriptRoot;$name='AdvancedAINetworkLanGateway';$root=Join-Path $env:ProgramData $name
-$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.6'
+$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.7'
 $runKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$result=[ordered]@{success=$false;version='0.6.9-lan.6';check_only=[bool]$CheckOnly}
+$result=[ordered]@{success=$false;version='0.6.9-lan.7';check_only=[bool]$CheckOnly}
 $backup=$null;$stopped=$false;$created=$false;$oldRun=$null;$uiStopped=$false;$oldRoot=$null;$oldLauncher=$null
 $payloadChanged=$false;$runChanged=$false
-$gatewayFiles=@('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys','config.json','intent.json')
+$installLock=$null
+function Set-LauncherStartup([string]$Key,[string]$Launcher){
+    if(!(Test-Path -LiteralPath $Key)){$null=New-Item -Path $Key}
+    Set-ItemProperty -LiteralPath $Key -Name AdvancedAIPrivateNetwork -Value ('"'+$Launcher+'" --startup')
+}
+$gatewayFiles=@('GatewayService.exe','TailscaleExit.exe','Tailscale-Licenses.txt','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys','config.json','intent.json')
+function Restore-GatewayFiles($Files,$BackupDirectory,$Destination){
+    foreach($file in $Files){
+        $saved=Join-Path $BackupDirectory $file
+        $to=Join-Path $Destination $file
+        if(Test-Path -LiteralPath $saved){
+            if(!(Test-Path -LiteralPath $to) -or (Get-FileHash -LiteralPath $saved).Hash -ne (Get-FileHash -LiteralPath $to).Hash){Copy-Item -LiteralPath $saved -Destination $to -Force}
+        }elseif(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Force}
+    }
+}
 function Save-Json($path,$data){[IO.File]::WriteAllText($path,($data|ConvertTo-Json -Depth 15),[Text.UTF8Encoding]::new($false))}
 function No-Link([string]$path){if((Test-Path -LiteralPath $path)-and((Get-Item -LiteralPath $path -Force).Attributes-band[IO.FileAttributes]::ReparsePoint)){throw ('目录不能是链接：'+$path)}}
 function Driver-Check([string]$path){if(!(Test-Path -LiteralPath $path)-or(Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant()-ne'8da085332782708d8767bcace5327a6ec7283c17cfb85e40b03cd2323a90ddc2'-or(Get-AuthenticodeSignature -LiteralPath $path).Status-ne'Valid'){throw 'WinDivert 驱动版本或签名不符；不会覆盖其他软件的驱动。'}}
@@ -60,6 +74,7 @@ try{
     $acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetAccessRuleProtection($true,$false);$acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
     foreach($sid in @('S-1-5-18','S-1-5-32-544')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
     $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($owner),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'));Set-Acl -LiteralPath $root -AclObject $acl
+    $installLock=[IO.File]::Open((Join-Path $root 'install.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
     foreach($seed in @(@('managed-rules.json','RuleSeed'),@('managed-domains.json','DomainSeed'))){$seedPath=Join-Path $root $seed[0];if(!(Test-Path -LiteralPath $seedPath)){[IO.File]::WriteAllText($seedPath,(Get-AiCompatibility $seed[1]),[Text.UTF8Encoding]::new($false))}}
     $rulesFile=Join-Path $root 'managed-rules.json'
     $policyTool=Join-Path $package 'Tools\GuardPolicyTool.exe'
@@ -91,7 +106,7 @@ try{
     foreach($item in Get-ChildItem (Join-Path $package 'App')){Copy-Item -LiteralPath $item.FullName -Destination $appRoot -Recurse -Force}
     & icacls.exe $appRoot /grant '*S-1-15-2-1:(OI)(CI)(RX)' /Q|Out-Null;if($LASTEXITCODE-ne 0){throw '无法为 Electron 沙箱设置读取权限。'}
     $payloadChanged=$true
-    foreach($file in @('GatewayService.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')){
+    foreach($file in @('GatewayService.exe','TailscaleExit.exe','Tailscale-Licenses.txt','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')){
         $from=Join-Path $package ('Gateway\'+$file);$to=Join-Path $root $file
         if(!(Test-Path -LiteralPath $to) -or (Get-FileHash -LiteralPath $to).Hash -ne (Get-FileHash -LiteralPath $from).Hash){Copy-Item -LiteralPath $from -Destination $to -Force}
     }
@@ -112,8 +127,7 @@ try{
     $afterRoute=@(Get-NetRoute -DestinationPrefix '0.0.0.0/0'|Sort-Object InterfaceIndex,NextHop|Select-Object InterfaceIndex,NextHop,RouteMetric)
     if(($beforeProxy|ConvertTo-Json -Compress)-ne($afterProxy|ConvertTo-Json -Compress)-or($beforeRoute|ConvertTo-Json -Compress)-ne($afterRoute|ConvertTo-Json -Compress)){throw '检测到系统代理或默认路由变化，请检查其他网络软件。'}
     $launcher=Join-Path $appRoot 'AdvancedAINetworkLauncher.exe'
-    if(!(Test-Path -LiteralPath $runKey)){$null=New-Item -Path $runKey}
-    Set-ItemProperty $runKey -Name AdvancedAIPrivateNetwork -Value ('"'+$launcher+'" --startup')
+    Set-LauncherStartup $runKey $launcher
     $runChanged=$true
     $shell=New-Object -ComObject WScript.Shell
     try{$shortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) '高级 AI 专用网络.lnk'));$shortcut.TargetPath=$launcher;$shortcut.WorkingDirectory=$appRoot;$shortcut.Save()}finally{[Runtime.InteropServices.Marshal]::ReleaseComObject($shell)|Out-Null}
@@ -135,20 +149,21 @@ try{
         try{
             Stop-Service $name -ErrorAction Stop
             if($payloadChanged){
-                foreach($file in $gatewayFiles){
-                    $saved=Join-Path $backup $file;$to=Join-Path $root $file
-                    if(Test-Path -LiteralPath $saved){
-                        if(!(Test-Path -LiteralPath $to) -or (Get-FileHash -LiteralPath $saved).Hash -ne (Get-FileHash -LiteralPath $to).Hash){Copy-Item -LiteralPath $saved -Destination $to -Force}
-                    }elseif(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Force}
-                }
+                Restore-GatewayFiles $gatewayFiles $backup $root
             }
             & "$env:WINDIR\System32\sc.exe" config $name start= $oldStart depend= $oldDependencies | Out-Null
             if($LASTEXITCODE){throw '无法恢复原服务启动配置。'}
             if($existing.State -eq 'Running'){
                 & $policyTool audit $rulesFile
                 if($LASTEXITCODE){throw '原服务的持久阻断核验失败。'}
-                $proof=(& (Join-Path $package 'Guard\Guard-Setup.ps1') -Action Status) | ConvertFrom-Json
-                if(!$proof.protected -or !$proof.tun_ready -or !$proof.dns_64_65_blocked){throw '域名保护未就绪。'}
+                $guardCheck=Join-Path $package 'Guard\Guard-Setup.ps1'
+                $deadline=[DateTime]::UtcNow.AddSeconds(50)
+                do{
+                    $proof=(& "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $guardCheck -Action Status) | ConvertFrom-Json
+                    $protected=$LASTEXITCODE -eq 0 -and $null -ne $proof -and $proof.protected -and $proof.tun_ready -and $proof.dns_64_65_blocked
+                    if(!$protected){Start-Sleep -Seconds 1}
+                }while(!$protected -and [DateTime]::UtcNow -lt $deadline)
+                if(!$protected){throw '域名保护未就绪。'}
                 Start-Service $name -ErrorAction Stop
                 $restoredPid=(Get-CimInstance Win32_Service -Filter "Name='$name'").ProcessId
                 $deadline=[DateTime]::UtcNow.AddSeconds(50)
@@ -180,6 +195,7 @@ try{
     Write-Host ('安装未完成：'+$result.error) -ForegroundColor Red
     Write-Host '已有域名保护会保留。修好配置后重跑安装；要解除限制请阅读 Uninstall.ps1 的说明。'
 }finally{
+    if($installLock){$installLock.Dispose()}
     if(!$CheckOnly){try{Save-Json (Join-Path $package 'install-result.json') $result}catch{};if($Hold){$null=Read-Host '按回车关闭'}}
 }
 if(!$result.success){exit 1}

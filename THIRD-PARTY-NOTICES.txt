@@ -8,6 +8,8 @@ WinDivert 2.2.2-A: unmodified official x64 DLL/SYS. This distribution uses the L
 
 sing-box 1.14.3: unmodified official Windows amd64 executable, GPLv3-or-later plus upstream naming notice. See Guard/core/LICENSE and COPYING. Exact upstream source and dependency source archives are in the separately downloadable third-party source archive. Original executable SHA256: 5c19bb3f8c12d4e85b3d47fe63123a7624b314b58dd7a8e32f51004f1c4d2faf. Source revision: 7054cac5124465ffdb145870d7c01885566711b1. https://github.com/SagerNet/sing-box/releases/tag/v1.14.3
 
+TailscaleExit uses SagerNet's tsnet fork and wireguard-go with the dependency versions pinned in Sources/tailscale/go.mod and go.sum. The compiled helper's notices are in Gateway/Tailscale-Licenses.txt.
+
 Npcap is NOT included. It must be separately obtained and installed by the recipient under the applicable license. Do not add Npcap installers or DLLs to this archive without redistribution rights. https://npcap.com/guide/npcap-users-guide.html https://npcap.com/oem/redist
 
 No user certificates, private keys, subscriptions, credentials, profiles, production reports or chat histories are distributed. Project source notice: see BUILDING.txt.

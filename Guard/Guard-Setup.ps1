@@ -27,16 +27,16 @@ trap {
     exit 1
 }
 $roots=@((Get-AiCompatibility 'S_d318762d9a7b1e'),(Get-AiCompatibility 'S_c55d5f6562819e'),'antspace.dev','clau.de',(Get-AiCompatibility 'S_743e483ae01f1f'),(Get-AiCompatibility 'S_3c3a75765581d1'),(Get-AiCompatibility 'S_ba35b59b5869e8'),(Get-AiCompatibility 'S_b55da41d0fb07a'),(Get-AiCompatibility 'S_c3b2d321f93f6b'),(Get-AiCompatibility 'S_cceb19833d60dc'),(Get-AiCompatibility 'S_9bf2a517ed3cdf'),(Get-AiCompatibility 'S_4d8d78a2b2b457'),(Get-AiCompatibility 'S_a1101ea07e3e93'),(Get-AiCompatibility 'S_62e4eb09895085'),'modelcontextprotocol.com','modelcontextprotocol.io','modelcontextprotocol.net','modelcontextprotocol.org','ant.dev',(Get-AiCompatibility 'S_e8d2487918725c'),(Get-AiCompatibility 'S_377781691d8cda'),(Get-AiCompatibility 'S_ea80aaae921557'),(Get-AiCompatibility 'S_2d7a1683632e95'),'intercom.io','intercomcdn.com','interface.feedback','lcicat.org','lcicollections.org','mcpservertest.online','muthos.com','sentry.io','sillylittleguy.org','statsigapi.net')
-$exact=@('api.ipify.org','icanhazip.com','ifconfig.me','ip.net.coffee',(Get-AiCompatibility 'S_783a5375a32dd3'),(Get-AiCompatibility 'S_7361a0b35b1d80'),(Get-AiCompatibility 'S_1e461caa6d3581'),'browser-intake-us5-datadoghq.com','cdn.growthbook.io','cdn.usefathom.com',(Get-AiCompatibility 'S_10aec8d3389d2c'),'storage.googleapis.com')
+$exact=@('challenges.cloudflare.com','api.ipify.org','icanhazip.com','ifconfig.me','ip.net.coffee',(Get-AiCompatibility 'S_783a5375a32dd3'),(Get-AiCompatibility 'S_7361a0b35b1d80'),(Get-AiCompatibility 'S_1e461caa6d3581'),'browser-intake-us5-datadoghq.com','cdn.growthbook.io','cdn.usefathom.com',(Get-AiCompatibility 'S_10aec8d3389d2c'),'storage.googleapis.com')
 $namespaces=@($roots | ForEach-Object {$_;'.'+$_})+$exact
-if($namespaces.Count -ne 78 -or $namespaces -contains '.'){throw 'Invalid protected namespace allowlist.'}
+if($namespaces.Count -ne 79 -or $namespaces -contains '.'){throw 'Invalid protected namespace allowlist.'}
 $policyDomains=[string[]]@($roots+$exact+@('keyword:datadog','keyword:sentry','keyword:sift'));[Array]::Sort($policyDomains,[StringComparer]::Ordinal)
 $dispatchDns='127.0.0.2'
 $managed=Join-Path $env:ProgramData 'AdvancedAINetworkLanGateway\managed-domains.json'
 if($keywordMode -and (Test-Path -LiteralPath $managed)){
     $dispatchDns='127.0.0.3'
     $liveDomains=(Get-Content -LiteralPath $managed -Raw -Encoding UTF8|ConvertFrom-Json).rules[0]
-    $policyDomains=[string[]]@(@($liveDomains.domain_suffix)+@($liveDomains.domain)+@($liveDomains.domain_keyword|ForEach-Object {'keyword:'+$_}))
+    $policyDomains=[string[]]@(@($liveDomains.domain_suffix)+@(@($liveDomains.domain)+'challenges.cloudflare.com'|Select-Object -Unique)+@($liveDomains.domain_keyword|ForEach-Object {'keyword:'+$_}))
     [Array]::Sort($policyDomains,[StringComparer]::Ordinal)
 }
 $policyDigest=[Security.Cryptography.SHA256]::Create()

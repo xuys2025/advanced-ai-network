@@ -17,6 +17,11 @@ public class ManagedRulesTests {
         Check(expired,"Expired ASN announcement was accepted");
         Check(Match(p,"160.79.104.0")&&Match(p,"160.79.111.255")&&!Match(p,"160.79.103.255")&&!Match(p,"160.79.112.0"),"CIDR edges");
         Check(p.MatchesProcess(AiCompatibility.S_25d2fedb323143)&&p.MatchesProcess(AiCompatibility.S_0615570f9ea136)&&p.MatchesProcess("CoWoRk-SvC.ExE")&&!p.MatchesProcess(AiCompatibility.S_0e36ada40747b4),"program OR");
+        Check(p.exact.Contains(ManagedRules.ChallengeDomain),"challenge missing after update");
+        Check(ManagedRules.IsDownload(ManagedRules.DownloadDomain.ToUpperInvariant()+".")&&!ManagedRules.IsDownload("sub."+ManagedRules.DownloadDomain),"download must match exactly");
+        Check(p.Provider(true).Contains("NOT,((DOMAIN,"+ManagedRules.DownloadDomain+"))"),"Clash domain provider captures download");
+        p.exact=p.exact.Except(new[]{ManagedRules.ChallengeDomain}).ToArray();p.Prepare();
+        Check(p.exact.Contains(ManagedRules.ChallengeDomain),"legacy policy lost challenge");
         var copy=ManagedRules.Parse(raw);copy.announced=new[]{"198.51.100.0/24"};copy.Prepare();
         Check(Match(copy,"198.51.100.17")&&!Match(copy,"198.51.101.17"),"ASN-only match");
         foreach(var bad in new[]{"MATCH,other","IP-CIDR,0.0.0.0/0","IP-CIDR,192.168.10.0/24","PROCESS-NAME,*","DOMAIN-SUFFIX,com","IP-ASN,nope","DOMAIN-KEYWORD,."}){

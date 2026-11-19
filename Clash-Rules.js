@@ -75,9 +75,10 @@ const AICompat = Object.freeze({
 // applyAdvancedAINetworkLan(config) at the end of its main(config, profileName).
 function applyAdvancedAINetworkLan(config) {
   const roots=[AICompat.S_d318762d9a7b1e,AICompat.S_c55d5f6562819e,'antspace.dev','clau.de',AICompat.S_743e483ae01f1f,AICompat.S_3c3a75765581d1,AICompat.S_ba35b59b5869e8,AICompat.S_b55da41d0fb07a,AICompat.S_c3b2d321f93f6b,AICompat.S_cceb19833d60dc,AICompat.S_9bf2a517ed3cdf,AICompat.S_4d8d78a2b2b457,AICompat.S_a1101ea07e3e93,AICompat.S_62e4eb09895085,'modelcontextprotocol.com','modelcontextprotocol.io','modelcontextprotocol.net','modelcontextprotocol.org','ant.dev',AICompat.S_e8d2487918725c,AICompat.S_377781691d8cda,AICompat.S_ea80aaae921557,AICompat.S_2d7a1683632e95,'intercom.io','intercomcdn.com','interface.feedback','lcicat.org','lcicollections.org','mcpservertest.online','muthos.com','sentry.io','sillylittleguy.org','statsigapi.net'];
-  const exact=['api.ipify.org','icanhazip.com','ifconfig.me','ip.net.coffee',AICompat.S_783a5375a32dd3,AICompat.S_7361a0b35b1d80,AICompat.S_1e461caa6d3581,'browser-intake-us5-datadoghq.com','cdn.growthbook.io','cdn.usefathom.com',AICompat.S_10aec8d3389d2c,'storage.googleapis.com'];
+  const download='downloads.'+AICompat.S_743e483ae01f1f;
+  const exact=['challenges.cloudflare.com','api.ipify.org','icanhazip.com','ifconfig.me','ip.net.coffee',AICompat.S_783a5375a32dd3,AICompat.S_7361a0b35b1d80,AICompat.S_1e461caa6d3581,'browser-intake-us5-datadoghq.com','cdn.growthbook.io','cdn.usefathom.com',AICompat.S_10aec8d3389d2c,'storage.googleapis.com'];
   const name='Advanced-AI-Network-LAN';
-  const target=d=>exact.includes(d)||roots.some(root=>d===root||d.endsWith('.'+root));
+  const target=d=>d!==download&&(exact.includes(d)||roots.some(root=>d===root||d.endsWith('.'+root)));
   const existing=(config.proxies||[]).find(p=>p.name===name);
   if(existing&&(existing.type!=='http'||existing.server!=='127.0.0.1'||existing.port!==17891))throw new Error('Advanced-AI-Network-LAN 名称已被其他代理占用。');
   if((config['proxy-groups']||[]).some(p=>p.name===name))throw new Error('Advanced-AI-Network-LAN 名称已被其他策略组占用。');
@@ -92,6 +93,11 @@ function applyAdvancedAINetworkLan(config) {
     if(low<=3323166719&&low+size-1>=3323150336)throw new Error('Clash fake-IP 地址段与专用 TUN 198.19.64.0/18 冲突。');
   }
   const policy=config.dns['nameserver-policy']=config.dns['nameserver-policy']||{};
+  // Preserve the download host's inherited DNS policy before moving its siblings.
+  for(const key of Object.keys(policy)){
+    if(key.split(',').some(x=>['+.','*.','.'].some(prefix=>x.toLowerCase()===prefix+AICompat.S_743e483ae01f1f)) && !Object.hasOwn(policy,download))
+      policy[download]=policy[key];
+  }
   for(const key of Object.keys(policy)){const parts=key.split(','),keep=parts.filter(part=>!target(part.replace(/^\+\.|^\*\.|^\./,'').toLowerCase()));if(keep.length!==parts.length){const value=policy[key];delete policy[key];if(keep.length)policy[keep.join(',')]=value;}}
   delete policy['rule-set:AdvancedAINetworkDomainKeywords'];
   const old=new Set([...roots.map(x=>'+.'+x),...exact,...roots.map(x=>'DOMAIN-SUFFIX,'+x+',real-ip'),...exact.map(x=>'DOMAIN,'+x+',real-ip'),'rule-set:AdvancedAINetworkDomainKeywords','RULE-SET,AdvancedAINetworkDomainKeywords,real-ip']);
@@ -108,10 +114,13 @@ function applyManagedAIRules(config, outbound = 'Advanced-AI-Network') {
     if(providers[name] && providers[name].url!==value.url)throw Error("Conflicting 高级 AI rule provider");
     providers[name]=value;
   }
-  const own='RULE-SET,'+tag+','+outbound;
-  const rules=(config.rules||[]).filter(r=>r!==own);
+  const download='downloads.'+AICompat.S_743e483ae01f1f;
+  const own='AND,((NOT,((DOMAIN,'+download+'))),(RULE-SET,'+tag+')),'+outbound;
+  const challenge='DOMAIN,challenges.cloudflare.com,'+outbound;
+  const generated=new Set([challenge,own,'RULE-SET,'+tag+','+outbound]);
+  const rules=(config.rules||[]).filter(r=>!generated.has(r));
   const at=rules.findIndex(r=>!r.startsWith('IP-CIDR,127.0.0.2/32,')&&!r.startsWith('IP-CIDR,198.19.64.0/18,')&&!r.includes(',Advanced-AI-Front,'));
-  rules.splice(at<0?rules.length:at,0,own);
+  rules.splice(at<0?rules.length:at,0,challenge,own);
   config.rules=rules;
   const dns=config.dns||(config.dns={});
   const policy=dns['nameserver-policy']||(dns['nameserver-policy']={});

@@ -17,7 +17,7 @@ using System.Web.Script.Serialization;
 using AdvancedAINetwork.Gateway;
 
 public sealed partial class GatewayService : ServiceBase {
-    public const string Name = "AdvancedAINetworkLanGateway", Version = "0.6.9-lan.6", PipeName = "AdvancedAINetworkLanGateway.Control";
+    public const string Name = "AdvancedAINetworkLanGateway", Version = "0.6.9-lan.7", PipeName = "AdvancedAINetworkLanGateway.Control";
     RuleFeed rules;
     readonly GatewayFailClosed networkGuard = new GatewayFailClosed();
     ConnectionTimingLog connectionTiming;
@@ -31,7 +31,7 @@ public sealed partial class GatewayService : ServiceBase {
     bool capturing, guardReady; string message = "Starting", lastExit = "", nativeError = "", ownerSid, gateway, local, adapter, lastCheck = "";
     int front; ProcessIdentity identity; GatewayTransport transport; GatewayProxy domainProxy, clashProxy; UdpForwarder udp;
     NativeBridge.OwnerSelector selector; NativeBridge.LogCallback logger;
-    object guardStatus; DateTime firewallChecked; string adapterName="";
+    object guardStatus; DateTime firewallChecked; string adapterName="",lanGateway="";
     public GatewayService() { ServiceName = Name; CanShutdown = true; CanStop = true; }
     static Dictionary<string,object> ReadJson(string path) { using(var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))using(var reader=new StreamReader(file))return Json.Deserialize<Dictionary<string,object>>(reader.ReadToEnd()); }
     static string Str(Dictionary<string,object> d,string key) { object value;return d.TryGetValue(key,out value)?Convert.ToString(value):""; }
@@ -91,7 +91,7 @@ public sealed partial class GatewayService : ServiceBase {
         }finally{Marshal.ReleaseComObject(policy);}
     }
     object Snapshot() {
-        return new {version=Version,heartbeat_diagnostics_revision=1,previous_status_write_error=statusWriteError,firewall_checks=Interlocked.Read(ref firewallChecks),firewall_property_writes=Interlocked.Read(ref firewallWrites),firewall_rules_added=Interlocked.Read(ref firewallAdds),service_pid=Process.GetCurrentProcess().Id,updated_utc=DateTime.UtcNow.ToString("o"),mode="lan-gateway",enabled=enabled,ready=ready,capturing=capturing,gateway=gateway,local_ip=local,adapter=adapter,adapter_name=adapterName,gateway_mac=transport==null?"":transport.GatewayMac,front_port=front,guard_protected=guardReady,tun_ready=guardReady,dns64_65_blocked=guardReady,guard=guardStatus,ipv6_firewall_ready=(DateTime.UtcNow-firewallChecked).TotalSeconds<45,last_exit=lastExit,exit_location=lastLocation,exit_colo=lastColo,exit_verified_utc=lastCheck,gateway_operation=operation,rule_sync=rules==null?null:rules.Status(),message=message,native_error=nativeError,process_ip_guard_live=networkGuard.Live,exit_protection="persistent-wfp",real_target_started=false,identities=identity==null?new object[0]:identity.Status(),transport=transport==null?null:transport.Status(),domain_proxy=domainProxy==null?null:domainProxy.Status(),clash_proxy=clashProxy==null?null:clashProxy.Status(),udp=udp==null?null:udp.Status()};
+        return new {version=Version,heartbeat_diagnostics_revision=1,previous_status_write_error=statusWriteError,firewall_checks=Interlocked.Read(ref firewallChecks),firewall_property_writes=Interlocked.Read(ref firewallWrites),firewall_rules_added=Interlocked.Read(ref firewallAdds),service_pid=Process.GetCurrentProcess().Id,updated_utc=DateTime.UtcNow.ToString("o"),mode=GatewayTransport.IsTailscale(gateway)?"tailscale":"lan-gateway",tailscale_supported=true,tailscale_login_required=LoginUrl()!="",lan_gateway=lanGateway,enabled=enabled,ready=ready,capturing=capturing,gateway=gateway,local_ip=local,adapter=adapter,adapter_name=adapterName,gateway_mac=transport==null?"":transport.GatewayMac,front_port=front,guard_protected=guardReady,tun_ready=guardReady,dns64_65_blocked=guardReady,guard=guardStatus,ipv6_firewall_ready=(DateTime.UtcNow-firewallChecked).TotalSeconds<45,last_exit=lastExit,exit_location=lastLocation,exit_colo=lastColo,exit_verified_utc=lastCheck,gateway_operation=operation,rule_sync=rules==null?null:rules.Status(),message=message,native_error=nativeError,process_ip_guard_live=networkGuard.Live,exit_protection="persistent-wfp",real_target_started=false,identities=identity==null?new object[0]:identity.Status(),transport=transport==null?null:transport.Status(),domain_proxy=domainProxy==null?null:domainProxy.Status(),clash_proxy=clashProxy==null?null:clashProxy.Status(),udp=udp==null?null:udp.Status()};
     }
     string statusWriteError="";
     void Save() {
@@ -118,7 +118,7 @@ public sealed partial class GatewayService : ServiceBase {
                     lock(sync){if(stopping.WaitOne(0))return;pipe=current;}
                     current.WaitForConnection();
                     object reply;
-                    try{string command=ReadCommand(current);HandleCommand(command);reply=Snapshot();}
+                    try{string command=ReadCommand(current);if(command=="tailscale:login")reply=new{url=LoginUrl()};else{HandleCommand(command);reply=Snapshot();}}
                     catch(Exception error){reply=new{error=error.GetBaseException().Message};}
                     byte[] response=Encoding.UTF8.GetBytes(Json.Serialize(reply)+"\n");current.Write(response,0,response.Length);
                 }
@@ -135,12 +135,13 @@ public sealed partial class GatewayService : ServiceBase {
             if(front<1||front>65535||front>=17891&&front<=17896)throw new IOException("Invalid system proxy port.");
             progress.Enter(GatewayStage.NetworkAdapter);
             var nic=NetworkInterface.GetAllNetworkInterfaces().Single(n=>n.Id.Equals(adapter,StringComparison.OrdinalIgnoreCase));
-            local=GatewayLink.ResolveSource(adapter,gateway);adapterName=nic.Name;
+            lanGateway=GatewayTransport.IsTailscale(gateway)?Str(config,"lan_gateway"):gateway;
+            local=GatewayLink.ResolveSource(adapter,lanGateway);adapterName=nic.Name;
             if(File.Exists(Path.Combine(Root,"intent.json")))enabled=Flag(ReadJson(Path.Combine(Root,"intent.json")),"enabled");
             progress.Enter(GatewayStage.ProcessIdentity);
             identity=new ProcessIdentity(Str(config,"desktop_image"),Str(config,"code_image"),ProcessIdentity.ProfileForOwner(ownerSid));
             progress.Enter(GatewayStage.OpenTransport);
-            transport=new GatewayTransport(adapter,local,gateway);
+            transport=new GatewayTransport(adapter,local,gateway,Root);
             progress.Enter(GatewayStage.LoadRules);
             rules=new RuleFeed(Root,transport,front,networkGuard);identity.RuleName=name=>rules.Active.MatchesProcess(name);transport.RuleForwarding=false;transport.Rules=()=>rules.Active;
             selector=identity.Select;logger=p=>{string value=Marshal.PtrToStringAnsi(p);if(value!=null&&(value.IndexOf("failed",StringComparison.OrdinalIgnoreCase)>=0||value.IndexOf("error",StringComparison.OrdinalIgnoreCase)>=0))nativeError=value;};NativeBridge.SetLogCallback(logger);
@@ -151,7 +152,7 @@ public sealed partial class GatewayService : ServiceBase {
                 message="等待保护网卡及策略核验，目标连接已阻断。";Save();
                 progress.Enter(GatewayStage.Wait);if(stopping.WaitOne(500))return;
             }
-            progress.Enter(GatewayStage.CheckExit);CheckExit();Firewall();
+            progress.Enter(GatewayStage.CheckExit);if(!GatewayTransport.IsTailscale(gateway))CheckExit();Firewall();
             progress.Enter(GatewayStage.StartCapture);
             uint proxy=NativeBridge.AddProxy(1,"127.0.0.1",17893,null,null,false);if(proxy==0||!NativeBridge.SetOwnerSelector(selector,proxy,(ushort)front))throw new IOException("Signed process routing setup failed.");
             udp=new UdpForwarder(null,17893){SelectOwner=identity.Select,IsReady=()=>ready};
@@ -159,6 +160,7 @@ public sealed partial class GatewayService : ServiceBase {
             if(!NativeBridge.Start())throw new IOException("Process forwarding could not start: "+nativeError);capturing=true;
             pipeWorker=Task.Run((Action)Pipe);DateTime nextLink=DateTime.MinValue,nextFirewall=DateTime.UtcNow.AddSeconds(15);
             bool linkReady=false;
+            Task<Dictionary<string,object>> recovery=null;string recoveringGateway="";
             while(!stopping.WaitOne(0)) {
                 progress.Enter(GatewayStage.CheckWorkers);
                 if(!NativeBridge.Alive()||!transport.Ready)throw new IOException("Network worker stopped.");
@@ -167,9 +169,20 @@ public sealed partial class GatewayService : ServiceBase {
                 if(applyRequested){progress.Enter(GatewayStage.ApplyGateway);ApplyCandidate();nextLink=DateTime.MinValue;}
                 if(!guardReady){progress.Enter(GatewayStage.CloseRelays);linkReady=false;nextLink=DateTime.MinValue;transport.RuleForwarding=false;CloseProxies();}
                 else if(DateTime.UtcNow>=nextLink){
-                    try{progress.Enter(GatewayStage.RefreshGateway);transport.RefreshLink();progress.Enter(GatewayStage.BindRelay);linkReady=BindRelay();}
+                    var tail=transport.ActiveTailscale;
+                    if(tail!=null && tail.Exited)throw new IOException("Tailscale 会话已退出，正在恢复专用后台。");
+                    try{progress.Enter(GatewayStage.RefreshGateway);transport.RefreshLink();
+                        if(recovery!=null && recovery.IsCompleted){
+                            var completed=recovery;recovery=null;
+                            var result=completed.GetAwaiter().GetResult();if(recoveringGateway==gateway)SetExit(result);
+                        }
+                        if(tail!=null && !tail.Verified && recovery==null){
+                            var route=transport.RetainActiveRoute();recoveringGateway=gateway;
+                            recovery=Task.Run(()=>{using(route)return ProbeRoute(route);});
+                        }
+                        progress.Enter(GatewayStage.BindRelay);linkReady=(tail==null||tail.Verified)&&BindRelay();}
                     catch(Exception error){nativeError=error.GetBaseException().Message;linkReady=false;}
-                    nextLink=DateTime.UtcNow.AddSeconds(linkReady?10:2);
+                    nextLink=DateTime.UtcNow.AddSeconds(tail!=null?1:linkReady?10:2);
                     if(!linkReady){progress.Enter(GatewayStage.CloseRelays);transport.RuleForwarding=false;CloseProxies();}
                 }
                 if(DateTime.UtcNow>=nextFirewall){Firewall();nextFirewall=DateTime.UtcNow.AddSeconds(15);}

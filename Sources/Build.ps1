@@ -1,4 +1,4 @@
-﻿param([string]$Zig,[switch]$ManagedOnly)
+﻿param([string]$Zig,[switch]$ManagedOnly,[string]$Go)
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'compatibility\Runtime.ps1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -7,6 +7,33 @@ $compatibility=Join-Path $compatibilityRoot 'Compatibility.cs'
 $out=Join-Path $PSScriptRoot 'build';$null=New-Item -ItemType Directory -Path $out -Force
 $csc=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if(!(Test-Path -LiteralPath $csc)){throw 'Install .NET Framework 4.8 on Windows x64.'}
+$exitHelper=Join-Path $out 'TailscaleExit.exe'
+if(!$Go){$goCommand=Get-Command go.exe -ErrorAction SilentlyContinue;if($goCommand){$Go=$goCommand.Source}}
+if($Go){
+    Push-Location (Join-Path $PSScriptRoot 'tailscale')
+    try{
+        & $Go test -p 2 -mod=readonly .
+        if($LASTEXITCODE){throw 'Tailscale offline tests failed.'}
+        & $Go build -p 2 -mod=readonly -trimpath -ldflags '-s -w' -o $exitHelper .
+        if($LASTEXITCODE){throw 'Tailscale exit helper compilation failed.'}
+        $moduleDirs=@(& $Go list -mod=readonly -deps -f '{{with .Module}}{{.Dir}}{{end}}' . | Where-Object {$_} | Sort-Object -Unique)
+        if($LASTEXITCODE){throw 'Cannot list the Tailscale dependencies.'}
+        $notices=[Text.StringBuilder]::new()
+        $goRoot=(& $Go env GOROOT).Trim()
+        [void]$notices.AppendLine('Go runtime').AppendLine([IO.File]::ReadAllText((Join-Path $goRoot 'LICENSE')))
+        foreach($directory in $moduleDirs){
+            foreach($file in Get-ChildItem -LiteralPath $directory -File | Where-Object {$_.Name -match '^(LICENSE|COPYING|NOTICE)([.\-_].*)?$'}){
+                [void]$notices.AppendLine(((Split-Path -Leaf $directory)+' / '+$file.Name)).AppendLine([IO.File]::ReadAllText($file.FullName))
+            }
+        }
+        [IO.File]::WriteAllText((Join-Path $out 'Tailscale-Licenses.txt'),$notices.ToString(),[Text.UTF8Encoding]::new($false))
+    }finally{Pop-Location}
+}else{
+    $supplied=Join-Path (Split-Path -Parent $PSScriptRoot) 'Gateway\TailscaleExit.exe'
+    if(!(Test-Path -LiteralPath $supplied)){throw 'Pass -Go with the path to Go 1.26 or newer to build the Tailscale helper.'}
+    Copy-Item -LiteralPath $supplied -Destination $exitHelper -Force
+    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $supplied) 'Tailscale-Licenses.txt') -Destination $out -Force
+}
 if(!$ManagedOnly){
     if(!$Zig){$command=Get-Command zig.exe -ErrorAction SilentlyContinue;if($command){$Zig=$command.Source}else{throw 'Pass -Zig with the path to Zig 0.15.1, or use -ManagedOnly to reuse the supplied native core.'}}
     $env:ZIG_GLOBAL_CACHE_DIR=Join-Path $out 'zig-global';$env:ZIG_LOCAL_CACHE_DIR=Join-Path $out 'zig-local'
@@ -56,6 +83,7 @@ if($LASTEXITCODE){throw 'Gateway maintenance test compilation failed.'}
 if($LASTEXITCODE){throw 'Gateway maintenance tests failed.'}
 & (Join-Path $PSScriptRoot 'tests\TunFirewallTests.ps1')
 & (Join-Path $PSScriptRoot 'tests\EffectiveDnsTests.ps1')
+& (Join-Path $PSScriptRoot 'tests\InstallRecoveryTests.ps1')
 & $csc /nologo /optimize+ /platform:x64 ('/out:'+(Join-Path $out 'GuardHeartbeatTests.exe')) $guardProof (Join-Path $PSScriptRoot 'tests\GuardHeartbeatTests.cs')
 if($LASTEXITCODE){throw 'Guard heartbeat test compilation failed.'}
 & (Join-Path $out 'GuardHeartbeatTests.exe')

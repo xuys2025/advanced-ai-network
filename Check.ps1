@@ -7,9 +7,12 @@ function Read-ExitIPv4([int]$Port){
     $body=(& "$env:WINDIR\System32\curl.exe" --disable -4 --silent --show-error --fail --max-time 12 @route https://api.ipify.org/)-join ''
     if($LASTEXITCODE){throw "HTTPS exit check failed (proxy port $Port)."}
     $value=$body.Trim()
+    return ConvertTo-ExitIPv4 $value
+}
+function ConvertTo-ExitIPv4([string]$value){
     $ip=$null
     if(![Net.IPAddress]::TryParse($value,[ref]$ip) -or $ip.AddressFamily -ne 'InterNetwork' -or $ip.ToString() -cne $value){
-        throw "Exit check returned an invalid IPv4 address (proxy port $Port)."
+        throw 'Exit check returned an invalid IPv4 address.'
     }
     return $value
 }

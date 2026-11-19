@@ -9,7 +9,7 @@ using System.Text;
 namespace AdvancedAINetwork.Gateway {
     // The IP packet keeps its destination. Only the Ethernet next hop changes.
     // No global routes, proxy settings, ARP entries, or adapter settings are written.
-    public sealed class GatewayLink : IDisposable {
+    public sealed class GatewayLink : IExitLink {
         public static IPAddress ParseGateway(string value) {
             IPAddress ip;
             if (value == null || !IPAddress.TryParse(value, out ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || ip.ToString() != value)

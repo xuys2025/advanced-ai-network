@@ -24,6 +24,8 @@ jobs:
       - name: Rebuild managed programs and run regression tests
         run: |
           & .\Sources\Build.ps1 -ManagedOnly
+          node Sources/tests/ExitMode.cjs
+          if($LASTEXITCODE){throw 'Exit mode UI tests failed.'}
           node Clash.Tests.cjs
           if($LASTEXITCODE){throw 'Clash tests failed.'}
       - name: Verify abrupt gateway exit on the disposable runner

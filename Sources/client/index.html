@@ -62,7 +62,7 @@
         </div>
       </div>
       <div class="metrics">
-        <article class="card metric"><div class="metric-label">出口网关 <span class="mini-tag">LAN</span></div><strong id="gateway" class="mono">—</strong><div id="nic-summary" class="muted">等待网卡信息</div></article>
+        <article class="card metric"><div class="metric-label">专用出口 <span class="mini-tag" id="mode-tag">LAN</span></div><strong id="gateway" class="mono">—</strong><div id="nic-summary" class="muted">等待网卡信息</div></article>
         <article class="card metric"><div class="metric-label">最近验证的公网 IP</div><strong id="public-ip" class="mono">—</strong><div id="exit-location" class="muted">等待出口验证</div></article>
         <article class="card metric"><div class="metric-label">本次连接流量</div><strong id="traffic-total">—</strong><div id="traffic-detail" class="muted">上传 — · 下载 —</div></article>
       </div>
@@ -77,12 +77,15 @@
   <section class="page" id="page-network" aria-labelledby="page-title" hidden>
     <div class="settings-layout">
       <div class="card settings-card">
-        <div class="card-heading"><div class="icon-tile"><svg aria-hidden="true" focusable="false"><use href="#i-route"/></svg></div><div><h2>自定义出口网关</h2><p>填写当前局域网中能够访问互联网的网关地址。</p></div><span class="pill good">IPv4</span></div>
+        <div class="card-heading"><div class="icon-tile"><svg aria-hidden="true" focusable="false"><use href="#i-route"/></svg></div><div><h2>专用出口</h2><p>验证后可查看出口公网 IP 和地区。</p></div><span class="pill good">IPv4</span></div>
         <div class="connection-strip"><div><span>当前网卡</span><strong id="settings-adapter">—</strong></div><div><span>本机地址</span><strong class="mono" id="settings-local">—</strong></div><div><span>正在使用</span><strong class="mono" id="settings-current">—</strong></div></div>
         <form id="gateway-form">
-          <label for="gateway-input">网关 IPv4 地址</label>
+          <label for="exit-mode">出口模式</label>
+          <select id="exit-mode"><option value="lan">局域网网关</option><option value="tailscale" disabled>Tailscale 出口节点</option></select>
+          <label id="gateway-label" for="gateway-input">网关 IPv4 地址</label>
           <div class="input-row"><input id="gateway-input" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="15" placeholder="192.168.1.254" aria-describedby="gateway-help validation-result"><button id="validate" class="button secondary" type="submit">验证出口</button></div>
           <p class="field-help" id="gateway-help">网关需要与当前网卡在同一子网。验证期间，现有连接继续使用原出口。</p>
+          <button type="button" id="tailscale-login" class="button secondary" hidden>登录 Tailscale</button>
           <div id="validation-result" class="validation muted" role="status" aria-live="polite">先验证网关，确认实际公网出口后即可保存。</div>
           <div class="form-footer"><p>切换出口时，专用连接会短暂重连。</p><button type="button" id="apply" class="button primary" aria-describedby="validation-result" disabled><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>保存并使用</button></div>
         </form>

@@ -1,6 +1,6 @@
 # 构建与维护
 
-Windows x64，PowerShell 5.1，.NET Framework 4.8。界面运行时使用 Electron 45.0.0。源码构建在普通目录内进行。
+Windows x64，PowerShell 5.1，.NET Framework 4.8。界面运行时使用 Electron 45.0.0。源码构建在普通目录内进行。Tailscale 出口组件位于 `Sources/tailscale`，从源码构建需要 Go 1.26 或更高版本；可向 `Build.ps1` 传入 `-Go C:\路径\go.exe`。完整开发包也可复用随包的组件。Go 包的测试使用内存中的 IPv4 数据包和模拟节点状态。
 
 ## 从发布包修改
 

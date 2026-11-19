@@ -3,6 +3,7 @@ Tools/
 Gateway/*.exe
 Gateway/*.dll
 Gateway/*.sys
+Gateway/Tailscale-Licenses.txt
 Guard/AdvancedAINetworkGuard.exe
 Guard/core/
 Sources/build/

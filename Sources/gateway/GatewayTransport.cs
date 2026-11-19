@@ -14,7 +14,11 @@ namespace AdvancedAINetwork.Gateway {
     // unchanged; a failed process lookup can never block another application's I/O.
     public sealed class GatewayTransport : IDisposable {
         readonly IPAddress local;
-        readonly string adapter;
+        readonly string adapter, stateRoot;
+        readonly int interfaceIndex;
+        readonly Dictionary<string,Route> tailRoutes = new Dictionary<string,Route>();
+        internal const string TailPrefix = "tailscale:";
+        internal static bool IsTailscale(string target) { return target!=null && target.StartsWith(TailPrefix,StringComparison.Ordinal); }
         readonly object routeSync = new object();
         Route activeRoute;
         readonly Timer sweeper;
@@ -27,23 +31,56 @@ namespace AdvancedAINetwork.Gateway {
         internal volatile bool RuleForwarding;
         long rulePackets,ruleDrops;
         public string LastError = "";
+        internal TailscaleLink ActiveTailscale {get{lock(routeSync)return activeRoute.Link as TailscaleLink;}}
         public bool Ready { get { return Volatile.Read(ref running) == 1; } }
         public string GatewayMac { get { lock(routeSync) return activeRoute.Link.GatewayMac; } }
         public void RefreshLink() { using(var route=RetainActiveRoute())route.Link.Refresh(); }
-        public Route CreateRoute(string gateway) { return new Route(this,new GatewayLink(adapter,local.ToString(),gateway)); }
+        public Route CreateRoute(string gateway) {
+            if(!IsTailscale(gateway)) return new Route(this,new GatewayLink(adapter,local.ToString(),gateway),null);
+            lock(routeSync){
+                Route route;
+                if(tailRoutes.TryGetValue(gateway,out route)){route.Retain();return route;}
+                if(stateRoot==null) throw new IOException("Missing Tailscale session directory.");
+                var link=new TailscaleLink(stateRoot,gateway.Substring(TailPrefix.Length),local,ReceiveReply);
+                route=new Route(this,link,gateway);tailRoutes.Add(gateway,route);return route;
+            }
+        }
+        void ReceiveReply(byte[] packet) {
+            if(!Ready || handle==IntPtr.Zero)return;
+            var metadata=new byte[80]; // NETWORK layer, inbound, physical adapter, sub-interface zero.
+            Buffer.BlockCopy(BitConverter.GetBytes(interfaceIndex),0,metadata,16,4);
+            uint sent;
+            if(!Divert.WinDivertHelperCalcChecksums(packet,(uint)packet.Length,metadata,0) ||
+               !Divert.WinDivertSend(handle,packet,(uint)packet.Length,out sent,metadata)) Interlocked.Increment(ref errors);
+        }
         public Route RetainActiveRoute() { lock(routeSync){activeRoute.Retain();return activeRoute;} }
         public void ActivateRoute(Route route) { lock(routeSync){if(route.Owner!=this)throw new IOException("Invalid gateway route.");route.Retain();var old=activeRoute;activeRoute=route;old.Dispose();} }
 
         public sealed class Route : IDisposable {
-            internal readonly GatewayTransport Owner; internal readonly GatewayLink Link;
+            internal readonly GatewayTransport Owner; internal readonly IExitLink Link;
+            readonly string key;
             readonly object sync=new object();int refs=1;
-            internal Route(GatewayTransport owner,GatewayLink link){Owner=owner;Link=link;}
+            internal Route(GatewayTransport owner,IExitLink link,string key){Owner=owner;Link=link;this.key=key;}
             internal void Retain(){lock(sync){if(refs==0)throw new ObjectDisposedException("Gateway route");refs++;}}
-            internal void Send(byte[] packet,int length,byte[] metadata){lock(sync){if(refs==0)throw new ObjectDisposedException("Gateway route");Link.Send(packet,length,metadata);}}
-            public void Dispose(){lock(sync){if(refs>0&&--refs==0)Link.Dispose();}}
+            internal void Send(byte[] packet,int length,byte[] metadata,bool probe=false){
+                lock(sync){
+                    if(refs==0)throw new ObjectDisposedException("Gateway route");
+                    var tail=Link as TailscaleLink;
+                    if(tail!=null && !probe && !tail.Verified)throw new IOException("Tailscale 出口等待验证。");
+                    Link.Send(packet,length,metadata);
+                }
+            }
+            public void Dispose(){
+                lock(Owner.routeSync){lock(sync){if(refs<=0||--refs!=0)return;if(key!=null)Owner.tailRoutes.Remove(key);}}
+                Link.Dispose();
+            }
         }
 
-        public GatewayTransport(string adapter, string source, string gateway) {
+        public GatewayTransport(string adapter, string source, string gateway, string stateRoot=null) {
+            this.stateRoot=stateRoot;
+            var nic=Array.Find(System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces(),n=>n.Id.Equals(adapter,StringComparison.OrdinalIgnoreCase));
+            if(nic==null)throw new IOException("当前网卡不可用。");
+            interfaceIndex=nic.GetIPProperties().GetIPv4Properties().Index;
             local = IPAddress.Parse(source);
             this.adapter=adapter;
             activeRoute = CreateRoute(gateway);
@@ -69,8 +106,9 @@ namespace AdvancedAINetwork.Gateway {
         }
         Lease Register(int protocol, int port, IPAddress target, int remotePort, Action close, Route route) {
             if (!Ready) throw new IOException("The gateway transport is unavailable.");
+            bool probe=route!=null;
             lock(routeSync){route=route??activeRoute;if(route.Owner!=this)throw new IOException("Invalid gateway route.");route.Retain();}
-            var lease = new Lease(this, Key(protocol, port, target, remotePort), close, route);
+            var lease = new Lease(this, Key(protocol, port, target, remotePort), close, route, probe);
             if(!owned.TryAdd(lease.Key,lease)){lease.ReleaseRoute();throw new IOException("Gateway socket tuple is still reserved.");}
             if (!Ready) { lease.Close(); throw new IOException("The gateway transport stopped during socket registration."); }
             return lease;
@@ -121,7 +159,7 @@ namespace AdvancedAINetwork.Gateway {
                         }
                     }
                     if (lease != null) {
-                        try { lease.Route.Send(packet, (int)length, metadata); Interlocked.Increment(ref forwarded); }
+                        try { lease.Route.Send(packet, (int)length, metadata, lease.Probe); Interlocked.Increment(ref forwarded); }
                         catch (Exception error) { LastError = error.Message; Interlocked.Increment(ref errors); lease.Close(); }
                     } else if(length>=20 && Rules!=null && Rules().MatchesIp(packet,16)) {
                         if(!RuleForwarding){Interlocked.Increment(ref ruleDrops);continue;}
@@ -163,9 +201,10 @@ namespace AdvancedAINetwork.Gateway {
             int closed;
             int released;
             internal readonly Route Route;
+            internal readonly bool Probe;
             long expiry = long.MaxValue;
             internal readonly string Key;
-            internal Lease(GatewayTransport owner, string key, Action close, Route route) { this.owner = owner; Key = key; this.close = close; Route=route; }
+            internal Lease(GatewayTransport owner, string key, Action close, Route route,bool probe) { Probe=probe;this.owner = owner; Key = key; this.close = close; Route=route; }
             internal void ReleaseRoute(){if(Interlocked.Exchange(ref released,1)==0)Route.Dispose();}
             internal bool Expired { get { return DateTime.UtcNow.Ticks > Interlocked.Read(ref expiry); } }
             public void Close() {

@@ -114,7 +114,12 @@ namespace AdvancedAINetwork.Gateway {
             GatewayTransport.RoutedTcp routed = null; TcpClient output = null; bool acknowledged = false;
             try {
                 if(trace!=null)trace.Mark("destination",new {api=string.Equals(host,AiCompatibility.S_0e4a7f621b2756,StringComparison.OrdinalIgnoreCase),port});
-                if (IPAddress.TryParse(host, out numeric) && Synthetic(numeric)) {
+                if (ManagedRules.IsDownload(host)) {
+                    // Port 17891 is the Clash-facing entry. A download arriving there
+                    // indicates stale Clash rules; handing it back would create a loop.
+                    if(trace!=null)trace.Phase("clash_download");
+                    output=await OpenDownload(Port,frontPort,port).ConfigureAwait(false);
+                } else if (IPAddress.TryParse(host, out numeric) && Synthetic(numeric)) {
                     if(trace!=null)trace.Phase("guard_mapping");
                     if (port != 80 && port != 443) throw new IOException("Unsupported synthetic-domain port.");
                     output = new TcpClient(); output.ReceiveTimeout = output.SendTimeout = 5000;
@@ -139,6 +144,21 @@ namespace AdvancedAINetwork.Gateway {
                 try { if (!acknowledged) { if (socks) SocksReply(stream, 1, 0); else Write(stream, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"); } } catch { }
                 throw;
             } finally { if (routed != null) routed.Dispose(); if (output != null) { output.Close(); lock (sync) clients.Remove(output); } }
+        }
+        internal static async Task<TcpClient> OpenDownload(int entryPort,int clashPort,int port) {
+            if(entryPort==17891)throw new IOException("请在 Clash 重新应用包含下载例外的合并脚本。");
+            var output=new TcpClient(AddressFamily.InterNetwork);
+            try {
+                output.ReceiveTimeout=output.SendTimeout=5000;
+                await output.ConnectAsync(IPAddress.Loopback,clashPort).ConfigureAwait(false);
+                var stream=output.GetStream();
+                string authority=ManagedRules.DownloadDomain+":"+port;
+                Write(stream,"CONNECT "+authority+" HTTP/1.1\r\nHost: "+authority+"\r\n\r\n");
+                string status=Header(stream,stream.ReadByte());
+                if(!status.StartsWith("HTTP/1.1 200 ",StringComparison.Ordinal)&&!status.StartsWith("HTTP/1.0 200 ",StringComparison.Ordinal))
+                    throw new IOException("Clash 拒绝了下载连接。");
+                return output;
+            }catch{output.Close();throw;}
         }
         static bool Synthetic(IPAddress ip) { byte[] b = ip.GetAddressBytes(); return b.Length == 4 && b[0] == 198 && b[1] == 19 && b[2] >= 64 && b[2] <= 127; }
         async Task Pump(TcpClient source, TcpClient target, bool upload, ConnectionTiming trace) {
@@ -174,7 +194,11 @@ namespace AdvancedAINetwork.Gateway {
                         if (client != null && !client.Equals(received.RemoteEndPoint)) continue;
                         using (var bytes = new MemoryStream(b, 4, b.Length - 4)) {
                             string name = SocksHost(bytes, b[3]); byte[] p = Read(bytes, 2); int port = p[0] * 256 + p[1];
-                            IPAddress address = dns.Resolve(name); string key = address + ":" + port; GatewayTransport.RoutedUdp route;
+                            // The configured Clash front is HTTP/mixed. Decline download QUIC so the client can retry over HTTPS.
+                            if(ManagedRules.IsDownload(name))continue;
+                            IPAddress address = dns.Resolve(name);
+                            if(Synthetic(address))continue;
+                            string key = address + ":" + port; GatewayTransport.RoutedUdp route;
                             if (!routes.TryGetValue(key, out route)) {
                                 if (routes.Count >= 64) continue;
                                 route = transport.OpenUdp(address, port); routes.Add(key, route);
