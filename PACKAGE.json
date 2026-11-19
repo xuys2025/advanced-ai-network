@@ -1,5 +1,5 @@
 {
-  "version": "0.6.9-lan.7",
+  "version": "0.6.9-lan.7.1",
   "platform": "Windows x64",
   "mode": "lan-gateway",
   "supported_exit_modes": ["lan-gateway", "tailscale"],

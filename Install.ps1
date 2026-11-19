@@ -5,9 +5,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $package=$PSScriptRoot;$name='AdvancedAINetworkLanGateway';$root=Join-Path $env:ProgramData $name
-$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.7'
+$appParent=Join-Path $env:LOCALAPPDATA 'Programs\AdvancedAINetwork';$appRoot=Join-Path $appParent 'electron-v0.6.9-lan.7.1'
 $runKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$result=[ordered]@{success=$false;version='0.6.9-lan.7';check_only=[bool]$CheckOnly}
+$result=[ordered]@{success=$false;version='0.6.9-lan.7.1';check_only=[bool]$CheckOnly}
 $backup=$null;$stopped=$false;$created=$false;$oldRun=$null;$uiStopped=$false;$oldRoot=$null;$oldLauncher=$null
 $payloadChanged=$false;$runChanged=$false
 $installLock=$null

@@ -16,7 +16,7 @@
 
 ---
 
-## 本次更新 · v0.6.9-lan.7
+## 本次更新 · v0.6.9-lan.7.1
 
 安装器现在保留其他软件的登录启动项。首次接管系统 DNS 前会分别检查普通域名和受保护域名。升级失败时会尝试恢复原网关服务与配置，并在安装报告中记录恢复结果。
 
@@ -38,7 +38,7 @@ CPU 繁忙时，旧版有时会提示「心跳已过期」，受保护的连接�
 
 网关逐项比对防火墙规则，只写入有变化的项目。守护服务一次读取生效的 DNS 策略，再核对每个受保护的域名。心跳间隔达到 5 秒时，后台会在恢复更新后把间隔和耗时最长的步骤记入 `%ProgramData%\AdvancedAINetworkLanGateway\heartbeat-stalls.jsonl`。如果守护服务停止或核验过期，受保护连接仍会被阻断。
 
-已有公开版用户请先保存工作并退出桌面端与 CLI，再解压新版、运行 `Install.cmd`，填写原网关和 Clash 端口。升级会重启相关服务。 [本版下载与校验值](https://github.com/xuys2025/advanced-ai-network/releases/tag/v0.6.9-lan.7)
+已有公开版用户请先保存工作并退出桌面端与 CLI，再解压新版、运行 `Install.cmd`，填写原网关和 Clash 端口。升级会重启相关服务。 [本版下载与校验值](https://github.com/xuys2025/advanced-ai-network/releases/tag/v0.6.9-lan.7.1)
 
 ## 先确认你的网络环境
 

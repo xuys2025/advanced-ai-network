@@ -7,7 +7,10 @@ internal static class LeaseFixture {
         try {
             if(args.Length==1 && args[0]=="remove-fixture"){GatewayFailClosed.Uninstall();return 0;}
             if(args.Length!=0)return 2;
-            var policy=new ManagedRules{processes=new[]{"ai-outage-fixture.exe"},ipv4=new[]{"192.0.2.17/32"},announced=new string[0],sha256="fixture"};
+            var policy=new ManagedRules{
+                roots=new string[0],exact=new string[0],keywords=new string[0],asns=new uint[0],
+                processes=new[]{"ai-outage-fixture.exe"},ipv4=new[]{"192.0.2.17/32"},announced=new string[0],sha256="fixture"
+            };
             policy.Prepare();
             using(var gate=new GatewayFailClosed()){
                 gate.SetPolicy(policy);

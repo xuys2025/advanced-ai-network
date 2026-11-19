@@ -17,7 +17,7 @@ using System.Web.Script.Serialization;
 using AdvancedAINetwork.Gateway;
 
 public sealed partial class GatewayService : ServiceBase {
-    public const string Name = "AdvancedAINetworkLanGateway", Version = "0.6.9-lan.7", PipeName = "AdvancedAINetworkLanGateway.Control";
+    public const string Name = "AdvancedAINetworkLanGateway", Version = "0.6.9-lan.7.1", PipeName = "AdvancedAINetworkLanGateway.Control";
     RuleFeed rules;
     readonly GatewayFailClosed networkGuard = new GatewayFailClosed();
     ConnectionTimingLog connectionTiming;
